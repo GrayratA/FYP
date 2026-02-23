@@ -643,3 +643,536 @@ end
 #     remove_lonely_boxes!(wd)
 #     return wd
 # end
+
+# ============================================================
+# Step 5 (+ Step 4.5 rewrite_for_data): diagram -> LaTeX fraction
+# Generic (no cfid-style naming). Optional data-mode rewriting.
+# ============================================================
+
+const WD = Catlab.WiringDiagrams
+
+# ---------- factor representation ----------
+struct ProbFactor
+    left::Vector{String}    # vars on left of P(...)
+    dovars::Vector{String}  # vars inside do(...)
+end
+
+# ---------- small expr AST ----------
+abstract type CFExpr end
+
+struct CFAtom <: CFExpr
+    s::String
+    left::Vector{String}       # var-names (e.g. "X","Y")
+    dovars::Vector{String}     # var-names inside do(...)
+    left_disp::Vector{String}  # printed tokens (e.g. "x'","y")
+    do_disp::Vector{String}    # printed tokens (e.g. "z","w","d")
+end
+
+struct CFProd <: CFExpr
+    terms::Vector{CFExpr}
+end
+
+struct CFSum <: CFExpr
+    vars::Vector{String}   # printed indices, e.g. ["w","d^*"]
+    body::CFExpr
+end
+
+struct CFFrac <: CFExpr
+    num::CFExpr
+    den::CFExpr
+end
+
+# ---------- LaTeX printing ----------
+function cf_latex(e::CFExpr)
+    if e isa CFAtom
+        return (e::CFAtom).s
+    elseif e isa CFProd
+        return join(cf_latex.((e::CFProd).terms), "")
+    elseif e isa CFSum
+        ee = e::CFSum
+        return "\\sum_{" * join(ee.vars, ",") * "} " * cf_latex(ee.body)
+    elseif e isa CFFrac
+        ee = e::CFFrac
+        return "\\frac{" * cf_latex(ee.num) * "}{" * cf_latex(ee.den) * "}"
+    else
+        error("unknown expr")
+    end
+end
+
+# ---------- parse naming conventions ----------
+function parse_prob_box_name(sym::Symbol)
+    s = String(sym)
+    startswith(s, "P") || return nothing
+    s2 = replace(s, r"^P_\d+" => "P")     # drop fragment id
+    m = match(r"P\((.*)\)", s2); m === nothing && return nothing
+    inside = m.captures[1]               # e.g. "X,Y ; do(Z),do(W)"
+    parts = split(inside, " ; ")
+    length(parts) == 2 || return nothing
+
+    left  = strip(parts[1])
+    right = strip(parts[2])
+
+    left_vars = left == "∅" ? String[] : split(replace(left, " " => ""), ",")
+    do_vars = String[]      # NOTE: store var-names inside do(...)
+    if right != "∅"
+        for tok in split(replace(right, " " => ""), ",")
+            mm = match(r"do\((.*)\)", tok)
+            mm !== nothing && push!(do_vars, mm.captures[1])
+        end
+    end
+    return ProbFactor(left_vars, do_vars)
+end
+
+parse_obs(sym::Symbol) = begin
+    s = String(sym)
+    m = match(r"^obs_(.*)=(.*)$", s)
+    m === nothing ? nothing : (m.captures[1], m.captures[2])  # ("X","x_hat")
+end
+
+parse_do(sym::Symbol) = begin
+    s = String(sym)
+    m = match(r"^do_(.*)=(.*)$", s)
+    m === nothing ? nothing : (m.captures[1], m.captures[2])  # ("X","x")
+end
+
+# ---------- naming policy ----------
+default_var_symbol(v::String) = lowercase(v)
+
+# build atom
+function factor_to_atom(
+    f::ProbFactor,
+    fixed_obs::Dict{String,String},
+    fixed_do::Dict{String,String},
+    var2sym::Dict{String,String}
+)
+    left_disp = String[]
+    for V in f.left
+        push!(left_disp, get(fixed_obs, V, get(var2sym, V, default_var_symbol(V))))
+    end
+    do_disp = String[]
+    for V in f.dovars
+        push!(do_disp, get(fixed_do, V, get(var2sym, V, default_var_symbol(V))))
+    end
+
+    evt_s = join(left_disp, ",")
+    s = isempty(f.dovars) ? "P(" * evt_s * ")" :
+                            "P(" * evt_s * "|do(" * join(do_disp, ",") * "))"
+
+    return CFAtom(s, copy(f.left), copy(f.dovars), left_disp, do_disp)
+end
+
+# collect all var-names from factors
+function collect_all_vars(factors::Vector{ProbFactor})
+    vars = Set{String}()
+    for f in factors
+        foreach(v -> push!(vars, v), f.left)
+        foreach(v -> push!(vars, v), f.dovars)
+    end
+    return vars
+end
+
+# ---------- generic simplification on sums ----------
+"""
+Simplify Σ_{sumvars} ∏ atoms:
+
+- drop summation vars that don't appear anymore
+- if v appears in exactly one atom, only in its LEFT list (not do list),
+  marginalize it out: Σ_v P(v,rest | do(...)) -> P(rest | do(...))
+- remove trivial factor "1"
+
+IMPORTANT: sumvars are VAR-NAMES (e.g. "Y","W"), not printed tokens.
+"""
+function simplify_sum(prod::CFProd, sumvars::Vector{String})
+    atoms = CFAtom[t for t in prod.terms if t isa CFAtom]
+
+    appears_in_atom(v::String, a::CFAtom) = (v in a.left) || (v in a.dovars)
+
+    changed = true
+    while changed
+        changed = false
+
+        # drop unused sum vars
+        used = Set{String}()
+        for a in atoms
+            foreach(v -> push!(used, v), a.left)
+            foreach(v -> push!(used, v), a.dovars)
+        end
+        new_sumvars = [v for v in sumvars if v in used]
+        if length(new_sumvars) != length(sumvars)
+            sumvars = new_sumvars
+            changed = true
+        end
+
+        # marginalize v if it appears in exactly one atom and only in left
+        for v in copy(sumvars)
+            hit = Int[]
+            for (i,a) in enumerate(atoms)
+                appears_in_atom(v, a) && push!(hit, i)
+            end
+            length(hit) == 1 || continue
+            i = hit[1]
+            a = atoms[i]
+            (v in a.left) || continue
+            (v in a.dovars) && continue
+
+            idxs = findall(==(v), a.left)
+            length(idxs) == 1 || continue
+            j = idxs[1]
+
+            new_left      = [a.left[k] for k in eachindex(a.left) if k != j]
+            new_left_disp = [a.left_disp[k] for k in eachindex(a.left_disp) if k != j]
+
+            new_evt = join(new_left_disp, ",")
+            new_s = isempty(new_left_disp) ? "1" :
+                    (isempty(a.dovars) ? "P($new_evt)" :
+                     "P($new_evt|do(" * join(a.do_disp, ",") * "))")
+
+            atoms[i] = CFAtom(new_s, new_left, a.dovars, new_left_disp, a.do_disp)
+
+            sumvars = [u for u in sumvars if u != v]
+            changed = true
+        end
+
+        # remove trivial "1"
+        before = length(atoms)
+        atoms = [a for a in atoms if a.s != "1"]
+        if length(atoms) != before
+            changed = true
+        end
+    end
+
+    return CFProd(CFExpr[a for a in atoms]), sumvars
+end
+
+# ---------- drop-do rule helpers ----------
+function build_adj(directed_edges::Vector{Tuple{String,String}})
+    adj = Dict{String,Vector{String}}()
+    for (u,v) in directed_edges
+        push!(get!(adj, u, String[]), v)
+        get!(adj, v, String[])
+    end
+    return adj
+end
+
+function is_descendant(target::String, sources::Vector{String}, adj::Dict{String,Vector{String}})
+    seen = Set{String}()
+    stack = copy(sources)
+    while !isempty(stack)
+        u = pop!(stack)
+        u in seen && continue
+        push!(seen, u)
+        for v in get(adj, u, String[])
+            v == target && return true
+            v in seen || push!(stack, v)
+        end
+    end
+    return false
+end
+
+"""
+Drop-do rule (safe):
+If ALL left vars are NOT descendants of any do-var, then P(left | do(do_vars)) -> P(left).
+"""
+function rule_drop_do!(atoms::Vector{CFAtom}, directed_edges::Vector{Tuple{String,String}})
+    isempty(directed_edges) && return atoms
+    adj = build_adj(directed_edges)
+
+    for i in eachindex(atoms)
+        a = atoms[i]
+        isempty(a.dovars) && continue
+
+        all_non_desc = all(V -> !is_descendant(V, a.dovars, adj), a.left)
+        all_non_desc || continue
+
+        new_s = "P(" * join(a.left_disp, ",") * ")"
+        atoms[i] = CFAtom(new_s, a.left, String[], a.left_disp, String[])
+    end
+    return atoms
+end
+
+"""
+Eliminate normalized sums:
+If v is a sum-var and only appears in a single atom whose left is exactly [v],
+and v does not appear anywhere else, then Σ_v P(v|...) = 1 and we can drop both.
+"""
+function rule_eliminate_sum_normalized!(prod::CFProd, sumvars::Vector{String})
+    atoms = CFAtom[t for t in prod.terms if t isa CFAtom]
+
+    function var_appears_elsewhere(v::String, atoms::Vector{CFAtom}, skip::Int)
+        for (i,a) in enumerate(atoms)
+            i == skip && continue
+            (v in a.left || v in a.dovars) && return true
+        end
+        return false
+    end
+
+    changed = true
+    while changed
+        changed = false
+        for v in copy(sumvars)
+            idx = nothing
+            for (i,a) in enumerate(atoms)
+                if length(a.left) == 1 && a.left[1] == v && !(v in a.dovars)
+                    idx = i
+                    break
+                end
+            end
+            idx === nothing && continue
+
+            if !var_appears_elsewhere(v, atoms, idx)
+                deleteat!(atoms, idx)
+                sumvars = [u for u in sumvars if u != v]
+                changed = true
+                break
+            end
+        end
+    end
+
+    return CFProd(CFExpr[a for a in atoms]), sumvars
+end
+
+# ---------- optional: data availability rewrite (generic Step 4.5) ----------
+_to_prod(e::CFExpr) = e isa CFProd ? (e::CFProd) : CFProd(CFExpr[e])
+
+function find_atom(e::CFExpr, pred)::Union{Nothing,CFAtom}
+    if e isa CFAtom
+        return pred(e::CFAtom) ? (e::CFAtom) : nothing
+    elseif e isa CFProd
+        for t in (e::CFProd).terms
+            a = find_atom(t, pred)
+            a === nothing || return a
+        end
+        return nothing
+    elseif e isa CFSum
+        return find_atom((e::CFSum).body, pred)
+    elseif e isa CFFrac
+        # search both sides just in case
+        f = e::CFFrac
+        a = find_atom(f.num, pred)
+        a === nothing ? find_atom(f.den, pred) : a
+    else
+        return nothing
+    end
+end
+
+"""
+rewrite_for_data(fr; data_mode=:none | :interventions)
+
+- :none -> no rewrite
+- :interventions -> introduce a fresh dummy variable (mix_var*) with printed token mix_sym (e.g. d^*),
+  and rewrite denominator into a mixture form:
+      den := Σ_{mix_sym} P(obs_token) P(z|do(mix_sym)) P(mix_sym)
+  and multiply numerator by Σ_{mix_sym} P(mix_sym) (merging with existing Σ_w if present).
+
+This is a presentation/canonicalization pass.
+"""
+function rewrite_for_data(
+    fr::CFFrac;
+    data_mode::Symbol = :none,
+    mix_var::String = "D",
+    mix_sym::String = "d^*",
+    z_var::String = "Z",
+    z_sym::String = "z",
+    obs_token::Union{Nothing,String} = nothing  # NEW: anchor token, e.g. "x'"
+)::CFFrac
+    data_mode == :none && return fr
+    data_mode == :interventions || error("rewrite_for_data: unknown data_mode=$data_mode")
+
+    mix_star = mix_var * "*"   # internal var-name for the dummy
+
+    # Find an atom of the form P(<tok>) with no do()
+    function is_P_of_token(a::CFAtom, tok::String)
+        isempty(a.dovars) || return false
+        length(a.left_disp) == 1 && a.left_disp[1] == tok
+    end
+
+    tok = isnothing(obs_token) ? "x'" : obs_token
+
+    # recursive search (works even if denominator is a sum/product nest)
+    Px = find_atom(fr.den, a -> is_P_of_token(a, tok))
+
+    if Px === nothing
+        # do not fail: this pass is a canonicalization for "data mode"
+        println("[rewrite_for_data] WARNING: could not find P($tok) in denominator; synthesizing it.")
+        println("[rewrite_for_data] den = ", cf_latex(fr.den))
+        Px = CFAtom("P($tok)", ["ANCHOR"], String[], [tok], String[])
+    end
+
+    # atoms: P(mix*) and P(z|do(mix*))
+    Pmix = CFAtom("P($mix_sym)", [mix_star], String[], [mix_sym], String[])
+    Pz_do_mix = CFAtom("P($z_sym|do($mix_sym))",
+                       [z_var], [mix_star],
+                       [z_sym], [mix_sym])
+
+    # numerator: merge sums if numerator already has Σ_{...}
+    old_num = fr.num
+    if old_num isa CFSum
+        s = old_num::CFSum
+        innerP = _to_prod(s.body)
+        num_inner = CFProd(vcat(innerP.terms, CFExpr[Pmix]))
+        num2 = CFSum(vcat(s.vars, [mix_sym]), num_inner)
+    else
+        numP = _to_prod(old_num)
+        num_inner = CFProd(vcat(numP.terms, CFExpr[Pmix]))
+        num2 = CFSum([mix_sym], num_inner)
+    end
+
+    # denominator: Σ_{mix_sym} P(tok) P(z|do(mix*)) P(mix*)
+    den_inner = CFProd(CFExpr[Px, Pz_do_mix, Pmix])
+    den2 = CFSum([mix_sym], den_inner)
+
+    return CFFrac(num2, den2)
+end
+
+# =========================
+# Step 5 main
+# =========================
+"""
+id_cf_step5:
+
+- Extract P(...) probability boxes from Step4 output diagram
+- Read obs_/do_ boxes as fixed values (PRINTING only)
+- Choose latent vars = all_vars_in_factors - output_vars - fixed_vars
+- Build RAW normalized fraction:
+    num = Σ_latent ∏ factors
+    den = Σ_{output_vars, latent} ∏ factors
+- simplify_sum does algebraic marginalization + drop unused sums
+- enable_cfid_rules applies: drop-do (with directed_edges), then eliminate Σ_v P(v|...) = 1
+- data_mode (Step 4.5): optional canonicalization based on what distributions are "available"
+"""
+function id_cf_step5(
+    wd::WiringDiagram;
+    output_vars::Vector{String},
+    force_latent::Vector{String} = String[],
+    var2sym::Dict{String,String} = Dict{String,String}(),
+    obs_value_rename::Dict{String,String} = Dict("x_hat"=>"x'"),
+    do_value_rename::Dict{String,String}  = Dict{String,String}(),  # NEW
+    simplify::Bool = true,
+    enable_cfid_rules::Bool = false,
+    directed_edges::Vector{Tuple{String,String}} = Tuple{String,String}[],
+    # generic data rewrite
+    data_mode::Symbol = :none,       # :none | :interventions
+    mix_var::String = "D",           # dummy mixture index base var-name
+    mix_sym::String = "d^*",         # printed dummy index
+    mix_target_var::String = "Z",    # NEW: which variable is z in P(z|do(d^*))
+    anchor_var::Union{Nothing,String} = "X",        # NEW: which var is observed anchor (e.g. X)
+    anchor_token::Union{Nothing,String} = nothing   # NEW: printed token for anchor (e.g. "x'"); if nothing, derive from fixed_obs[anchor_var]
+)
+    # fixed obs/do (for printing)
+    fixed_obs = Dict{String,String}()
+    fixed_do  = Dict{String,String}()
+
+    for b in WD.box_ids(wd)
+        nm = box_name(wd, b)
+        if (p = parse_obs(nm)) !== nothing
+            V, v = p
+            fixed_obs[V] = get(obs_value_rename, v, v)
+        elseif (p = parse_do(nm)) !== nothing
+            V, v = p
+            fixed_do[V] = get(do_value_rename, v, v)  # APPLY rename
+        end
+    end
+
+    # resolve anchor token for rewrite_for_data
+    resolved_anchor_token = anchor_token
+    if resolved_anchor_token === nothing && anchor_var !== nothing
+        if haskey(fixed_obs, anchor_var)
+            resolved_anchor_token = fixed_obs[anchor_var]
+        end
+    end
+
+    # collect factors
+    factors = ProbFactor[]
+    for b in WD.box_ids(wd)
+        nm = box_name(wd, b)
+        f = parse_prob_box_name(nm)
+        f === nothing && continue
+        push!(factors, f)
+    end
+
+    # build product
+    atoms = CFExpr[]
+    for f in factors
+        push!(atoms, factor_to_atom(f, fixed_obs, fixed_do, var2sym))
+    end
+    prod = CFProd(atoms)
+
+    # latent var-names
+    all_vars = collect_all_vars(factors)
+    fixed_vars = Set{String}(keys(fixed_obs))
+    union!(fixed_vars, keys(fixed_do))
+    out_set = Set{String}(output_vars)
+
+    latent = String[]
+    for v in all_vars
+        if !(v in out_set) && !(v in fixed_vars)
+            push!(latent, v)
+        end
+    end
+    for v in force_latent
+        v in latent || push!(latent, v)
+    end
+    sort!(latent)
+
+    # numerator = Σ_latent ∏ factors
+    num_sumvars_vars = copy(latent)
+    num_prod = prod
+
+    # denominator = Σ_{output_vars, latent} ∏ factors
+    den_sumvars_vars = vcat(copy(output_vars), latent)
+    den_prod = prod
+
+    if simplify
+        num_prod, num_sumvars_vars = simplify_sum(num_prod, num_sumvars_vars)
+        den_prod, den_sumvars_vars = simplify_sum(den_prod, den_sumvars_vars)
+    end
+
+    if enable_cfid_rules
+        if !isempty(directed_edges)
+            num_atoms = CFAtom[t for t in num_prod.terms if t isa CFAtom]
+            den_atoms = CFAtom[t for t in den_prod.terms if t isa CFAtom]
+            num_atoms = rule_drop_do!(num_atoms, directed_edges)
+            den_atoms = rule_drop_do!(den_atoms, directed_edges)
+            num_prod = CFProd(CFExpr[a for a in num_atoms])
+            den_prod = CFProd(CFExpr[a for a in den_atoms])
+        end
+        num_prod, num_sumvars_vars = rule_eliminate_sum_normalized!(num_prod, num_sumvars_vars)
+        den_prod, den_sumvars_vars = rule_eliminate_sum_normalized!(den_prod, den_sumvars_vars)
+    end
+
+    sum_symbol(v::String) = get(var2sym, v, default_var_symbol(v))
+    num_sumvars = sum_symbol.(num_sumvars_vars)
+    den_sumvars = sum_symbol.(den_sumvars_vars)
+
+    num_expr = isempty(num_sumvars) ? num_prod : CFSum(num_sumvars, num_prod)
+    den_expr = isempty(den_sumvars) ? den_prod : CFSum(den_sumvars, den_prod)
+
+    raw_frac = CFFrac(num_expr, den_expr)
+    raw_tex  = cf_latex(raw_frac)
+
+    # simplified currently same as raw
+    simp_frac = raw_frac
+    simp_tex  = raw_tex
+
+    # Optional data rewrite (generic)
+    zv = mix_target_var
+    z_sym = get(var2sym, zv, lowercase(zv))
+
+    data_frac = rewrite_for_data(
+        simp_frac;
+        data_mode=data_mode,
+        mix_var=mix_var,
+        mix_sym=mix_sym,
+        z_var=zv,
+        z_sym=z_sym,
+        obs_token=resolved_anchor_token
+    )
+    data_tex = cf_latex(data_frac)
+
+    return (
+        raw_frac = raw_frac,
+        raw_tex = raw_tex,
+        simplified_tex = simp_tex,
+        data_tex = data_tex
+    )
+end
