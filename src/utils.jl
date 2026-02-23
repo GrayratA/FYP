@@ -9,6 +9,12 @@ using Catlab.Programs
 using Catlab.Graphics
 using Catlab.Graphics: Graphviz, to_graphviz
 
+# domain size  = number of boundary input wires
+n_in_boundary(wd::WiringDiagram)  = length(WD.output_ports(wd))
+
+# codomain size = number of boundary output wires
+n_out_boundary(wd::WiringDiagram) = length(WD.input_ports(wd))
+
 
 draw(d::WiringDiagram) = to_graphviz(d;
   orientation=LeftToRight,

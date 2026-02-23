@@ -1,0 +1,22 @@
+gen D : 1 -> 2
+gen PU_D : 0 -> 1
+gen PU_R : 0 -> 1
+gen PU_W : 0 -> 1
+gen PU_X : 0 -> 1
+gen PU_Y : 0 -> 1
+gen PU_Z : 0 -> 1
+gen R : 1 -> 2
+gen W : 1 -> 2
+gen X : 1 -> 2
+gen Z : 1 -> 2
+gen copy : 1 -> 2
+gen del : 1 -> 0
+gen f_D : 1 -> 1
+gen f_R : 1 -> 1
+gen f_W : 2 -> 1
+gen f_X : 2 -> 1
+gen f_Y : 4 -> 1
+gen f_Z : 2 -> 1
+gen merge : 2 -> 1
+
+let base = PU_D * id * id * id * id * id ; PU_R * id * id * id * id * id * id ; PU_W * id * id * id * id * id * id * id ; PU_X * id * id * id * id * id * id * id * id ; PU_Y * id * id * id * id * id * id * id * id * id ; PU_Z * id * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * f_D * id * id * id * id * id ; id * id * id * id * f_R * id * id * id * id * id * id ; id * id * id * id * id * D * id * id * id * id * id ; id * id * id * id * R * id * id * id * id * id * id * id ; sw[0, 7, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12] ; sw[1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] ; f_Z * id * id * id * id * id * id * id * id * id * id * id ; sw[0, 1, 2, 4, 3, 5, 6, 7, 8, 9, 10, 11] ; sw[0, 1, 3, 2, 4, 5, 6, 7, 8, 9, 10, 11] ; id * id * f_X * id * id * id * id * id * id * id * id ; Z * id * id * id * id * id * id * id * id * id * id ; id * id * id * X * id * id * id * id * id * id * id * id ; id * id * id * id * f_W * id * id * id * id * id * id * id ; id * id * id * id * W * id * id * id * id * id * id * id ; sw[0, 1, 2, 5, 6, 3, 4, 7, 8, 9, 10, 11, 12] ; sw[0, 3, 1, 4, 2, 5, 6, 7, 8, 9, 10, 11, 12] ; id * f_Y * id * id * id * id * id * id * id * id
