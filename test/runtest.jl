@@ -23,6 +23,7 @@ include(joinpath(@__DIR__, "..", "src", "id_cf.jl"))
 @testset "admg_compile" begin
     include(joinpath(@__DIR__, "admg_compile", "test_admg.jl"))
     include(joinpath(@__DIR__, "admg_compile", "test_build_multiverse_labels.jl"))
+    include(joinpath(@__DIR__, "admg_compile", "test_rootify.jl"))
 end
 
 # ===============================s
@@ -43,5 +44,8 @@ end
     include(joinpath(@__DIR__, "id_cf", "test_step42_collapse_prob_box.jl"))
     include(joinpath(@__DIR__, "id_cf", "test_Rfragements.jl"))
     include(joinpath(@__DIR__, "id_cf", "test_id_cf_general_test.jl"))
-    
+end
+
+@testset "id-cf Step5" begin
+    include(joinpath(@__DIR__, "id_cf", "test_step5.jl"))
 end

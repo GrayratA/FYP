@@ -10,12 +10,35 @@ struct ConfoundedModel
     latents::Dict{Symbol, Vector{Symbol}}
 end
 
+struct ADMGModel
+    directed::Vector{Pair{Symbol, Symbol}}
+    bidirected::Vector{Pair{Symbol, Symbol}}
+end
+
+Base.:(==)(a::ConfoundedModel, b::ConfoundedModel) =
+    a.directed == b.directed && a.latents == b.latents
+
+Base.:(==)(a::ADMGModel, b::ADMGModel) =
+    a.directed == b.directed && a.bidirected == b.bidirected
+
 # Define query structure
 struct CounterfactualQuery
     world_name::Symbol
     interventions::Dict{Symbol, Symbol}
     observations::Dict{Symbol, Symbol}
     outputs::Vector{Symbol}
+end
+
+function rootify(model::ADMGModel; latent_prefix::Symbol=:R)
+    latents = Dict{Symbol, Vector{Symbol}}()
+
+    for (i, edge) in enumerate(model.bidirected)
+        a, b = edge.first, edge.second
+        a == b && error("rootify: bidirected edge $edge must connect two distinct variables")
+        latents[Symbol(latent_prefix, i)] = [a, b]
+    end
+
+    return ConfoundedModel(copy(model.directed), latents)
 end
 
 function graph_b_to_scm(model::ConfoundedModel; outputs=nothing)
@@ -83,6 +106,10 @@ function graph_b_to_scm(model::ConfoundedModel; outputs=nothing)
     end
 
     return wd
+end
+
+function graph_b_to_scm(model::ADMGModel; outputs=nothing, latent_prefix::Symbol=:R)
+    return graph_b_to_scm(rootify(model; latent_prefix=latent_prefix); outputs=outputs)
 end
 
 
