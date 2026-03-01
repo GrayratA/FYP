@@ -1,0 +1,18 @@
+gen R : 1 -> 2
+gen cUD : 0 -> 1
+gen cUR : 0 -> 1
+gen cUW : 1 -> 1
+gen cUX : 1 -> 1
+gen cUY : 3 -> 1
+gen cUZ : 1 -> 1
+gen copy : 1 -> 2
+gen d : 1 -> 0 "7FDBFF"
+gen del : 1 -> 0
+gen doZ : 0 -> 1
+gen do_d : 0 -> 1 "FFD166"
+gen do_x : 0 -> 1 "FFD166"
+gen merge : 2 -> 1
+gen x_hat : 1 -> 0 "7FDBFF"
+gen z : 1 -> 0 "7FDBFF"
+
+let simplify3 = doZ * id ; do_d * id * id ; cUD * id * id * id ; cUR * id * id * id * id ; do_x * id * id * id * id * id ; id * id * id * cUZ * id * id ; id * id * d * id * id * id ; id * R * id * id * id ; cUW * id * id * id * id * id ; id * id * id * z * id * id ; id * id * cUX * id * id ; sw[0, 1, 3, 2, 4] ; sw[1, 0, 2, 3, 4] ; cUY * id * id ; id * x_hat * id

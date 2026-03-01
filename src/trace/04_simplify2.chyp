@@ -1,0 +1,24 @@
+gen PU_D : 0 -> 1
+gen PU_R : 0 -> 1
+gen PU_W : 0 -> 1
+gen PU_X : 0 -> 1
+gen PU_Y : 0 -> 1
+gen PU_Z : 0 -> 1
+gen R : 1 -> 2
+gen copy : 1 -> 2
+gen d : 1 -> 0 "7FDBFF"
+gen del : 1 -> 0
+gen doZ : 0 -> 1
+gen do_d : 0 -> 1 "FFD166"
+gen do_x : 0 -> 1 "FFD166"
+gen f_D : 1 -> 1
+gen f_R : 1 -> 1
+gen f_W : 2 -> 1
+gen f_X : 2 -> 1
+gen f_Y : 4 -> 1
+gen f_Z : 2 -> 1
+gen merge : 2 -> 1
+gen x_hat : 1 -> 0 "7FDBFF"
+gen z : 1 -> 0 "7FDBFF"
+
+let simplify2 = PU_D * id ; PU_R * id * id ; PU_W * id * id * id ; PU_X * id * id * id * id ; PU_Y * id * id * id * id * id ; PU_Z * id * id * id * id * id * id ; do_x * id * id * id * id * id * id * id ; doZ * id * id * id * id * id * id * id * id ; do_d * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * f_D * id ; id * id * id * id * id * id * id * f_R * id * id ; sw[0, 1, 2, 6, 3, 4, 5, 7, 8, 9] ; id * id * f_W * id * id * id * id * id * id ; sw[0, 3, 1, 2, 4, 5, 6, 7, 8] ; f_Z * id * id * id * id * id * id * id ; id * id * id * id * id * id * d * id ; id * id * id * id * id * R * id ; z * id * id * id * id * id * id * id ; sw[0, 1, 2, 4, 3, 5, 6] ; sw[1, 0, 3, 2, 4, 5, 6] ; f_Y * id * id * id ; id * f_X * id ; id * x_hat * id

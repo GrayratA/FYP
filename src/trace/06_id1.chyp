@@ -1,0 +1,15 @@
+gen P_1_X_Y___do_Z__do_W__ : 2 -> 2
+gen P_2_D_____ : 0 -> 1
+gen P_3_W___do_X__ : 1 -> 1
+gen P_4_Z___do_D__ : 1 -> 1
+gen copy : 1 -> 2
+gen d : 1 -> 0 "7FDBFF"
+gen del : 1 -> 0
+gen doZ : 0 -> 1
+gen do_d : 0 -> 1 "FFD166"
+gen do_x : 0 -> 1 "FFD166"
+gen merge : 2 -> 1
+gen x_hat : 1 -> 0 "7FDBFF"
+gen z : 1 -> 0 "7FDBFF"
+
+let id1 = do_x * id ; doZ * id * id ; do_d * id * id * id ; P_2_D_____ * id * id * id * id ; id * id * id * P_3_W___do_X__ * id ; id * P_4_Z___do_D__ * id * id * id ; d * id * id * id * id ; sw[0, 2, 1, 3] ; id * P_1_X_Y___do_Z__do_W__ * id ; z * id * id * id ; x_hat * id * id

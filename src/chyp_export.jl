@@ -18,6 +18,16 @@ include("utils.jl")
 # ---------- string utils ----------
 sanitize_ident(s::AbstractString) = replace(s, r"[^A-Za-z0-9_]" => "_")
 
+function parse_do_label(s::AbstractString)
+    m = match(r"^do_(.*)=(.*)$", s)
+    m === nothing ? nothing : (m.captures[1], m.captures[2])
+end
+
+function parse_obs_label(s::AbstractString)
+    m = match(r"^obs_(.*)=(.*)$", s)
+    m === nothing ? nothing : (m.captures[1], m.captures[2])
+end
+
 tensor_ids(n::Int) =
     n <= 0 ? "" :
     n == 1 ? "id" :
@@ -43,13 +53,44 @@ function make_block_perm(N::Int, pos::Vector{Int}, k::Int)
 end
 
 # ---------- junction naming ----------
-function chyp_box_name(wd::WiringDiagram, bid::Int)
+function preferred_chyp_box_name(raw_name::AbstractString)
+    do_label = parse_do_label(raw_name)
+    do_label !== nothing && return sanitize_ident("do_" * do_label[2])
+
+    obs_label = parse_obs_label(raw_name)
+    obs_label !== nothing && return sanitize_ident(obs_label[2])
+
+    return sanitize_ident(raw_name)
+end
+
+function preferred_chyp_box_colors(raw_name::AbstractString)
+    parse_do_label(raw_name) !== nothing && return ("FFD166", "")
+    parse_obs_label(raw_name) !== nothing && return ("7FDBFF", "")
+    return ("", "")
+end
+
+function fallback_chyp_box_name(raw_name::AbstractString)
+    sanitize_ident(raw_name)
+end
+
+function chyp_box_spec(wd::WiringDiagram, bid::Int)
     nm = safe_box_name(wd, bid)
     if nm === nothing
-        return "box_$(bid)"
-    else
-        return sanitize_ident(String(nm))
+        return (name="box_$(bid)", fallback="box_$(bid)", colors=("", ""))
     end
+
+    raw_name = String(nm)
+    return (name=preferred_chyp_box_name(raw_name),
+            fallback=fallback_chyp_box_name(raw_name),
+            colors=preferred_chyp_box_colors(raw_name))
+end
+
+function chyp_box_name(wd::WiringDiagram, bid::Int)
+    chyp_box_spec(wd, bid).name
+end
+
+function chyp_box_colors(wd::WiringDiagram, bid::Int)
+    chyp_box_spec(wd, bid).colors
 end
 
 function is_junction_box(wd::WiringDiagram, bid::Int)
@@ -69,6 +110,17 @@ function junction_gen_name(wd::WiringDiagram, bid::Int)
     else
         # fallback: keep a unique name
         return chyp_box_name(wd, bid)
+    end
+end
+
+function color_suffix(colors::Tuple{String,String})
+    bg, fg = colors
+    if bg != "" && fg != ""
+        return " \"$(bg)\" \"$(fg)\""
+    elseif bg != ""
+        return " \"$(bg)\""
+    else
+        return ""
     end
 end
 
@@ -98,24 +150,52 @@ function wd_to_chyp(wd::WiringDiagram; name::String="main")
         error("topo failed on junctionized wd: missing=$(missing) extra=$(extra)")
     end
 
-    # 3) Generator declarations
-    gen_specs = Dict{Tuple{String,Int,Int},Bool}()
-
-    # Always include junction structure gens
-    gen_specs[("copy", 1, 2)] = true
-    gen_specs[("merge", 2, 1)] = true
-    gen_specs[("del", 1, 0)] = true
+    # 3) Resolve generator names and declarations.
+    box_names = Dict{Int,String}()
+    box_colors = Dict{Int,Tuple{String,String}}()
+    used_names = Dict{String,Tuple{Int,Int}}()
 
     for bid in bs
-        g = is_junction_box(wdJ, bid) ? junction_gen_name(wdJ, bid) : chyp_box_name(wdJ, bid)
         m = nin(wdJ, bid)
         n = nout(wdJ, bid)
-        gen_specs[(g, m, n)] = true
+
+        if is_junction_box(wdJ, bid)
+            name = junction_gen_name(wdJ, bid)
+            box_names[bid] = name
+            box_colors[bid] = ("", "")
+            used_names[name] = (m, n)
+            continue
+        end
+
+        spec = chyp_box_spec(wdJ, bid)
+        if !haskey(used_names, spec.name) || used_names[spec.name] == (m, n)
+            box_names[bid] = spec.name
+            box_colors[bid] = spec.colors
+            used_names[spec.name] = (m, n)
+        else
+            box_names[bid] = spec.fallback
+            box_colors[bid] = spec.colors
+            used_names[spec.fallback] = (m, n)
+        end
+    end
+
+    gen_specs = Dict{Tuple{String,Int,Int},Tuple{String,String}}()
+
+    # Always include junction structure gens
+    gen_specs[("copy", 1, 2)] = ("", "")
+    gen_specs[("merge", 2, 1)] = ("", "")
+    gen_specs[("del", 1, 0)] = ("", "")
+
+    for bid in bs
+        g = box_names[bid]
+        m = nin(wdJ, bid)
+        n = nout(wdJ, bid)
+        gen_specs[(g, m, n)] = box_colors[bid]
     end
 
     gen_lines = String[]
-    for ((g,m,n), _) in sort!(collect(gen_specs); by=x->x[1])
-        push!(gen_lines, "gen $(g) : $(m) -> $(n)")
+    for ((g,m,n), colors) in sort!(collect(gen_specs); by=x->x[1])
+        push!(gen_lines, "gen $(g) : $(m) -> $(n)" * color_suffix(colors))
     end
 
     # 4) Live wires represent the current ordered tensor of available outputs.
@@ -135,7 +215,7 @@ function wd_to_chyp(wd::WiringDiagram; name::String="main")
 
     # 5) Compile boxes
     for bid in bs
-        g = is_junction_box(wdJ, bid) ? junction_gen_name(wdJ, bid) : chyp_box_name(wdJ, bid)
+        g = box_names[bid]
         m = nin(wdJ, bid)
         n = nout(wdJ, bid)
 
