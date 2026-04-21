@@ -28,6 +28,16 @@ function has_wire_pair(wd::WiringDiagram, src::Tuple{Int,Int}, tgt::Tuple{Int,In
     end
     return false
 end
+
+function count_boxes_by_name(wd::WiringDiagram, name::Symbol)::Int
+    count = 0
+    for b in WD.box_ids(wd)
+        b == WD.input_id(wd)  && continue
+        b == WD.output_id(wd) && continue
+        WD.box(wd, b).value == name && (count += 1)
+    end
+    return count
+end
 # --------------------------------
 
 
@@ -52,6 +62,7 @@ end
 
     wd = build_multiverse(base, queries)
     drop_discard_branches!(wd)
+    separate_sharp_effect_copy_maps!(wd)
     merge_identical_deterministic_boxes(wd)
 
     # 1) outputs
@@ -63,7 +74,7 @@ end
         :f_D, :f_R, :f_W, :f_Z, :f_X, :f_Y,
         Symbol("do_X=x"),
         Symbol("do_D=d"),
-        :doZ,
+        Symbol("do_Z=z"),
         Symbol("obs_X=x0"),
         Symbol("obs_D=d"),
         Symbol("obs_Z=z"),
@@ -106,4 +117,60 @@ end
 
     # 5) total wire count
     @test length(WD.wires(wd)) == 16
+end
+
+@testset "merge_identical_deterministic_boxes requires truly shared inputs" begin
+    wd = WiringDiagram([], Any[:Y, :Y])
+
+    src_w1 = WD.add_box!(wd, Box(:src_w1, Any[], Any[:W]))
+    src_w2 = WD.add_box!(wd, Box(:src_w2, Any[], Any[:W]))
+    src_z  = WD.add_box!(wd, Box(:src_z, Any[], Any[:Z]))
+    src_r  = WD.add_box!(wd, Box(:src_r, Any[], Any[:R]))
+    src_u  = WD.add_box!(wd, Box(:PU_Y, Any[], Any[:UY]))
+
+    fy1 = WD.add_box!(wd, Box(:f_Y, Any[:W, :Z, :R, :UY], Any[:Y]))
+    fy2 = WD.add_box!(wd, Box(:f_Y, Any[:W, :Z, :R, :UY], Any[:Y]))
+
+    WD.add_wire!(wd, (src_w1, 1) => (fy1, 1))
+    WD.add_wire!(wd, (src_w2, 1) => (fy2, 1))
+    WD.add_wire!(wd, (src_z, 1) => (fy1, 2))
+    WD.add_wire!(wd, (src_z, 1) => (fy2, 2))
+    WD.add_wire!(wd, (src_r, 1) => (fy1, 3))
+    WD.add_wire!(wd, (src_r, 1) => (fy2, 3))
+    WD.add_wire!(wd, (src_u, 1) => (fy1, 4))
+    WD.add_wire!(wd, (src_u, 1) => (fy2, 4))
+    WD.add_wire!(wd, (fy1, 1) => (WD.output_id(wd), 1))
+    WD.add_wire!(wd, (fy2, 1) => (WD.output_id(wd), 2))
+
+    merge_identical_deterministic_boxes(wd)
+
+    @test count_boxes_by_name(wd, :f_Y) == 2
+end
+
+@testset "merge_identical_deterministic_boxes does not stop after first non-mergeable name" begin
+    wd = WiringDiagram([], Any[:A, :A, :B, :B])
+
+    src_x1 = WD.add_box!(wd, Box(:src_x1, Any[], Any[:X]))
+    src_x2 = WD.add_box!(wd, Box(:src_x2, Any[], Any[:X]))
+    src_z  = WD.add_box!(wd, Box(:src_z, Any[], Any[:Z]))
+
+    fa1 = WD.add_box!(wd, Box(:f_A, Any[:X], Any[:A]))
+    fa2 = WD.add_box!(wd, Box(:f_A, Any[:X], Any[:A]))
+    fb1 = WD.add_box!(wd, Box(:f_B, Any[:Z], Any[:B]))
+    fb2 = WD.add_box!(wd, Box(:f_B, Any[:Z], Any[:B]))
+
+    WD.add_wire!(wd, (src_x1, 1) => (fa1, 1))
+    WD.add_wire!(wd, (src_x2, 1) => (fa2, 1))
+    WD.add_wire!(wd, (src_z, 1) => (fb1, 1))
+    WD.add_wire!(wd, (src_z, 1) => (fb2, 1))
+
+    WD.add_wire!(wd, (fa1, 1) => (WD.output_id(wd), 1))
+    WD.add_wire!(wd, (fa2, 1) => (WD.output_id(wd), 2))
+    WD.add_wire!(wd, (fb1, 1) => (WD.output_id(wd), 3))
+    WD.add_wire!(wd, (fb2, 1) => (WD.output_id(wd), 4))
+
+    merge_identical_deterministic_boxes(wd)
+
+    @test count_boxes_by_name(wd, :f_A) == 2
+    @test count_boxes_by_name(wd, :f_B) == 1
 end

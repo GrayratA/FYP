@@ -23,6 +23,7 @@ include(joinpath(@__DIR__, "..", "src", "id_cf.jl"))
 @testset "admg_compile" begin
     include(joinpath(@__DIR__, "admg_compile", "test_admg.jl"))
     include(joinpath(@__DIR__, "admg_compile", "test_build_multiverse_labels.jl"))
+    include(joinpath(@__DIR__, "admg_compile", "test_bn_import.jl"))
     include(joinpath(@__DIR__, "admg_compile", "test_rootify.jl"))
 end
 

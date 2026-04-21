@@ -41,6 +41,15 @@ function has_any_box_with_prefix(wd::WiringDiagram, prefix::String)::Bool
     return false
 end
 
+function expect_error_message(f::Function)::String
+    try
+        f()
+    catch e
+        return sprint(showerror, e)
+    end
+    error("Expected an error, but the call succeeded")
+end
+
 @testset "id-cf: drug example" begin
     fig_15b_model = ConfoundedModel(
         [
@@ -82,6 +91,7 @@ end
 
     simplified_wd = full_wd
     drop_discard_branches!(simplified_wd)
+    separate_sharp_effect_copy_maps!(simplified_wd)
     merge_identical_deterministic_boxes(simplified_wd)
     replace_fx_with_cx!(simplified_wd)
 
@@ -95,7 +105,7 @@ end
     doX  = box_id_by_name(wd, Symbol("do_X=doX_"))
     obsX = box_id_by_name(wd, Symbol("obs_X=x"))
     obsD = box_id_by_name(wd, Symbol("obs_D=d"))
-    doZ  = box_id_by_name(wd, :doZ)
+    doZ  = box_id_by_name(wd, Symbol("do_Z=z"))
     doD  = box_id_by_name(wd, Symbol("do_D=d"))
     P1   = box_id_by_name(wd, Symbol("P_1(X,Y ; do(Z),do(W))"))
     P2   = box_id_by_name(wd, Symbol("P_2(D ; ∅)"))
@@ -150,4 +160,27 @@ end
 
     # 6) (optional) sanity: should still have no f_* boxes
     @test !has_any_box_with_prefix(wd, "f_")
+end
+
+@testset "id-cf Step3: FAIL when shared lambda remains unabsorbed" begin
+    wd = WiringDiagram([], Any[:Y])
+    puY = WD.add_box!(wd, Box(:PU_Y, Any[], Any[:UY]))
+    doX = WD.add_box!(wd, Box(Symbol("do_X=x"), Any[], Any[:X]))
+    obsY = WD.add_box!(wd, Box(Symbol("obs_Y=y"), Any[:Y], Any[]))
+    fY1 = WD.add_box!(wd, Box(:f_Y, Any[:X, :UY], Any[:Y]))
+    fY2 = WD.add_box!(wd, Box(:f_Y, Any[:X, :UY], Any[:Y]))
+
+    WD.add_wire!(wd, (puY, 1) => (fY1, 2))
+    WD.add_wire!(wd, (puY, 1) => (fY2, 2))
+    WD.add_wire!(wd, (doX, 1) => (fY1, 1))
+    WD.add_wire!(wd, (doX, 1) => (fY2, 1))
+    WD.add_wire!(wd, (fY1, 1) => (WD.output_id(wd), 1))
+    WD.add_wire!(wd, (fY2, 1) => (obsY, 1))
+
+    msg = expect_error_message() do
+        id_cf_step4!(wd, Set([:Y]); verbose=false)
+    end
+
+    @test occursin("FAIL (step3)", msg)
+    @test occursin("f_Y", msg)
 end

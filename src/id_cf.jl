@@ -593,8 +593,17 @@ function id_cf_step42!(wd, r_frags; verbose::Bool=true)
     return wd
 end
 
+function id_cf_step3_check!(wd)
+    remaining = unabsorbed_lambda_boxes(wd)
+    isempty(remaining) && return wd
+
+    names = [string(safe_box_name(wd, b)) for b in remaining]
+    error("FAIL (step3): λ_X was not absorbed into c_X for " * join(names, ", "))
+end
+
 
 function id_cf_step4!(wd, display_vars; verbose::Bool=true)
+    id_cf_step3_check!(wd)
     r_frags = id_cf_step41!(wd, display_vars; r_frags=nothing, verbose=verbose)
     id_cf_step42!(wd, r_frags; verbose=verbose)
     return wd
@@ -646,7 +655,7 @@ end
 
 # ============================================================
 # Step 5 (+ Step 4.5 rewrite_for_data): diagram -> LaTeX fraction
-# Generic (no cfid-style naming). Optional data-mode rewriting.
+# Generic (no starred-style naming). Optional data-mode rewriting.
 # ============================================================
 
 const WD = Catlab.WiringDiagrams
@@ -687,7 +696,9 @@ function cf_latex(e::CFExpr)
     if e isa CFAtom
         return (e::CFAtom).s
     elseif e isa CFProd
-        return join(cf_latex.((e::CFProd).terms), "")
+        terms = (e::CFProd).terms
+        isempty(terms) && return "1"
+        return join(cf_latex.(terms), "")
     elseif e isa CFSum
         ee = e::CFSum
         return "\\sum_{" * join(ee.vars, ",") * "} " * cf_latex(ee.body)
@@ -715,9 +726,11 @@ function parse_prob_box_name(sym::Symbol)
     left_vars = left == "∅" ? String[] : split(replace(left, " " => ""), ",")
     do_vars = String[]      # NOTE: store var-names inside do(...)
     if right != "∅"
-        for tok in split(replace(right, " " => ""), ",")
-            mm = match(r"do\((.*)\)", tok)
-            mm !== nothing && push!(do_vars, mm.captures[1])
+        compact = replace(right, " " => "")
+        for mm in eachmatch(r"do\(([^)]*)\)", compact)
+            body = mm.captures[1]
+            isempty(body) && continue
+            append!(do_vars, [v for v in split(body, ",") if !isempty(v)])
         end
     end
     return ProbFactor(left_vars, do_vars)
@@ -743,15 +756,35 @@ function factor_to_atom(
     f::ProbFactor,
     fixed_obs::Dict{String,String},
     fixed_do::Dict{String,String},
-    var2sym::Dict{String,String}
+    var2sym::Dict{String,String};
+    display_mode::Symbol = :legacy,
+    star_left_vars::Set{String} = Set{String}()
 )
+    display_mode in (:legacy, :starred_style) ||
+        error("factor_to_atom: unsupported display_mode=$display_mode")
+
+    base_disp(V::String) = get(var2sym, V, default_var_symbol(V))
+    star_disp(V::String) = base_disp(V) * "^*"
+
     left_disp = String[]
     for V in f.left
-        push!(left_disp, get(fixed_obs, V, get(var2sym, V, default_var_symbol(V))))
+        if display_mode == :legacy
+            push!(left_disp, get(fixed_obs, V, base_disp(V)))
+        else
+            if isempty(f.dovars) && length(f.left) == 1 && (V in star_left_vars)
+                push!(left_disp, star_disp(V))
+            else
+                push!(left_disp, base_disp(V))
+            end
+        end
     end
     do_disp = String[]
     for V in f.dovars
-        push!(do_disp, get(fixed_do, V, get(var2sym, V, default_var_symbol(V))))
+        if display_mode == :legacy
+            push!(do_disp, get(fixed_do, V, base_disp(V)))
+        else
+            push!(do_disp, base_disp(V))
+        end
     end
 
     evt_s = join(left_disp, ",")
@@ -973,7 +1006,9 @@ function rewrite_for_data(
     mix_sym::String = "d^*",
     z_var::String = "Z",
     z_sym::String = "z",
-    obs_token::Union{Nothing,String} = nothing  # NEW: anchor token, e.g. "x'"
+    obs_token::Union{Nothing,String} = nothing,  # NEW: anchor token, e.g. "x'"
+    mix_token::Union{Nothing,String} = nothing,  # NEW: printed token for original mix var, e.g. "d"
+    anchor_is_mix::Bool = false,                 # NEW: skip explicit anchor factor when anchor var == mix var
 )::CFFrac
     data_mode == :none && return fr
     data_mode == :interventions || error("rewrite_for_data: unknown data_mode=$data_mode")
@@ -988,14 +1023,17 @@ function rewrite_for_data(
 
     tok = isnothing(obs_token) ? "x'" : obs_token
 
-    # recursive search (works even if denominator is a sum/product nest)
-    Px = find_atom(fr.den, a -> is_P_of_token(a, tok))
+    Px = nothing
+    if !anchor_is_mix
+        # recursive search (works even if denominator is a sum/product nest)
+        Px = find_atom(fr.den, a -> is_P_of_token(a, tok))
 
-    if Px === nothing
-        # do not fail: this pass is a canonicalization for "data mode"
-        println("[rewrite_for_data] WARNING: could not find P($tok) in denominator; synthesizing it.")
-        println("[rewrite_for_data] den = ", cf_latex(fr.den))
-        Px = CFAtom("P($tok)", ["ANCHOR"], String[], [tok], String[])
+        if Px === nothing
+            # do not fail: this pass is a canonicalization for "data mode"
+            println("[rewrite_for_data] WARNING: could not find P($tok) in denominator; synthesizing it.")
+            println("[rewrite_for_data] den = ", cf_latex(fr.den))
+            Px = CFAtom("P($tok)", ["ANCHOR"], String[], [tok], String[])
+        end
     end
 
     # atoms: P(mix*) and P(z|do(mix*))
@@ -1004,105 +1042,459 @@ function rewrite_for_data(
                        [z_var], [mix_star],
                        [z_sym], [mix_sym])
 
+    # numerator: replace plain P(mix_token) by P(mix*) if present; otherwise append P(mix*).
+    # This avoids leaving a stale P(d) term while introducing the mixture index d^*.
+    function replace_or_append_mix_atom(terms::Vector{CFExpr}, tok::String, mix_atom::CFAtom)
+        replaced = false
+        new_terms = CFExpr[]
+        for t in terms
+            if t isa CFAtom
+                a = t::CFAtom
+                if isempty(a.dovars) && length(a.left_disp) == 1 && a.left_disp[1] == tok
+                    push!(new_terms, mix_atom)
+                    replaced = true
+                    continue
+                end
+            end
+            push!(new_terms, t)
+        end
+        if !replaced
+            push!(new_terms, mix_atom)
+        end
+        return new_terms
+    end
+
+    mix_tok = isnothing(mix_token) ? lowercase(mix_var) : mix_token
+
     # numerator: merge sums if numerator already has Σ_{...}
     old_num = fr.num
     if old_num isa CFSum
         s = old_num::CFSum
-        innerP = _to_prod(s.body)
-        num_inner = CFProd(vcat(innerP.terms, CFExpr[Pmix]))
-        num2 = CFSum(vcat(s.vars, [mix_sym]), num_inner)
+        inner_terms = _to_prod(s.body).terms
+        num_terms = replace_or_append_mix_atom(inner_terms, mix_tok, Pmix)
+        num_inner = CFProd(num_terms)
+        new_sumvars = mix_sym in s.vars ? s.vars : vcat(s.vars, [mix_sym])
+        num2 = CFSum(new_sumvars, num_inner)
     else
-        numP = _to_prod(old_num)
-        num_inner = CFProd(vcat(numP.terms, CFExpr[Pmix]))
+        num_terms = replace_or_append_mix_atom(_to_prod(old_num).terms, mix_tok, Pmix)
+        num_inner = CFProd(num_terms)
         num2 = CFSum([mix_sym], num_inner)
     end
 
-    # denominator: Σ_{mix_sym} P(tok) P(z|do(mix*)) P(mix*)
-    den_inner = CFProd(CFExpr[Px, Pz_do_mix, Pmix])
+    function is_mix_related_atom(a::CFAtom, mv::String, mt::String)
+        (mv in a.left) || (mv in a.dovars) || (mt in a.left_disp) || (mt in a.do_disp)
+    end
+
+    function star_mix_atom_for_den(a::CFAtom, mv::String, mt::String, mv_star::String, msym::String)
+        new_left = [v == mv ? mv_star : v for v in a.left]
+        new_left_disp = [d == mt ? msym : d for d in a.left_disp]
+
+        mix_in_do = any(v -> v == mv, a.dovars) || any(d -> d == mt, a.do_disp)
+        new_do = mix_in_do ? [mv_star] : [v == mv ? mv_star : v for v in a.dovars]
+        new_do_disp = mix_in_do ? [msym] : [d == mt ? msym : d for d in a.do_disp]
+
+        evt_s = join(new_left_disp, ",")
+        s = isempty(new_do_disp) ? "P(" * evt_s * ")" :
+            "P(" * evt_s * "|do(" * join(new_do_disp, ",") * "))"
+        return CFAtom(s, new_left, new_do, new_left_disp, new_do_disp)
+    end
+
+    den_body = fr.den isa CFSum ? (fr.den::CFSum).body : fr.den
+    den_terms_old = _to_prod(den_body).terms
+    mix_terms = CFExpr[]
+    for t in den_terms_old
+        t isa CFAtom || continue
+        a = t::CFAtom
+        is_mix_related_atom(a, mix_var, mix_tok) || continue
+        push!(mix_terms, star_mix_atom_for_den(a, mix_var, mix_tok, mix_star, mix_sym))
+    end
+
+    den_terms = CFExpr[]
+    if !isempty(mix_terms)
+        if !anchor_is_mix
+            push!(den_terms, Px::CFAtom)
+        end
+        append!(den_terms, mix_terms)
+        has_pmix = any(t -> begin
+            t isa CFAtom || return false
+            a = t::CFAtom
+            length(a.left) == 1 && a.left[1] == mix_star && isempty(a.dovars)
+        end, den_terms)
+        has_pmix || push!(den_terms, Pmix)
+    else
+        # fallback canonical form when no mix-related denominator atom is detected
+        if !anchor_is_mix
+            push!(den_terms, Px::CFAtom)
+        end
+        push!(den_terms, Pz_do_mix, Pmix)
+    end
+
+    den_inner = CFProd(den_terms)
     den2 = CFSum([mix_sym], den_inner)
 
     return CFFrac(num2, den2)
 end
 
-# =========================
-# Step 5 main
-# =========================
-"""
-id_cf_step5:
+_to_prod_expr(e::CFExpr) = e isa CFProd ? (e::CFProd) : CFProd(CFExpr[e])
 
-- Extract P(...) probability boxes from Step4 output diagram
-- Read obs_/do_ boxes as fixed values (PRINTING only)
-- Choose latent vars = all_vars_in_factors - output_vars - fixed_vars
-- Build RAW normalized fraction:
-    num = Σ_latent ∏ factors
-    den = Σ_{output_vars, latent} ∏ factors
-- simplify_sum does algebraic marginalization + drop unused sums
-- enable_cfid_rules applies: drop-do (with directed_edges), then eliminate Σ_v P(v|...) = 1
-- data_mode (Step 4.5): optional canonicalization based on what distributions are "available"
-"""
-function id_cf_step5(
-    wd::WiringDiagram;
+function map_atoms(e::CFExpr, f)::CFExpr
+    if e isa CFAtom
+        return f(e::CFAtom)
+    elseif e isa CFProd
+        ee = e::CFProd
+        new_terms = CFExpr[]
+        for t in ee.terms
+            mapped = map_atoms(t, f)
+            if mapped isa CFAtom && (mapped::CFAtom).s == "1"
+                continue
+            end
+            push!(new_terms, mapped)
+        end
+        return CFProd(new_terms)
+    elseif e isa CFSum
+        ee = e::CFSum
+        return CFSum(copy(ee.vars), map_atoms(ee.body, f))
+    elseif e isa CFFrac
+        ee = e::CFFrac
+        return CFFrac(map_atoms(ee.num, f), map_atoms(ee.den, f))
+    end
+    return e
+end
+
+function rebuild_atom(
+    a::CFAtom;
+    left_disp::Vector{String}=copy(a.left_disp),
+    do_disp::Vector{String}=copy(a.do_disp),
+)::CFAtom
+    if length(a.left) == 1 && isempty(a.dovars)
+        s = "P(" * join(left_disp, ",") * ")"
+    else
+        evt_s = join(left_disp, ",")
+        s = isempty(do_disp) ? "P(" * evt_s * ")" :
+            "P(" * evt_s * "|do(" * join(do_disp, ",") * "))"
+    end
+    return CFAtom(s, copy(a.left), copy(a.dovars), left_disp, do_disp)
+end
+
+function wrap_sumvar(expr::CFExpr, var::String)::CFExpr
+    if expr isa CFSum
+        ee = expr::CFSum
+        return var in ee.vars ? expr : CFSum(vcat(ee.vars, [var]), ee.body)
+    end
+    return CFSum([var], expr)
+end
+
+function rewrite_conditional_queries(
+    fr::CFFrac,
+    factors::Vector{ProbFactor},
+    fixed_obs::Dict{String,String},
+    fixed_do::Dict{String,String},
+    query_obs::Dict{String,String},
+    query_do::Dict{String,String},
     output_vars::Vector{String},
-    force_latent::Vector{String} = String[],
-    var2sym::Dict{String,String} = Dict{String,String}(),
-    obs_value_rename::Dict{String,String} = Dict("x_hat"=>"x'"),
-    do_value_rename::Dict{String,String}  = Dict{String,String}(),  # NEW
-    simplify::Bool = true,
-    enable_cfid_rules::Bool = false,
-    directed_edges::Vector{Tuple{String,String}} = Tuple{String,String}[],
-    # generic data rewrite
-    data_mode::Symbol = :none,       # :none | :interventions
-    mix_var::String = "D",           # dummy mixture index base var-name
-    mix_sym::String = "d^*",         # printed dummy index
-    mix_target_var::String = "Z",    # NEW: which variable is z in P(z|do(d^*))
-    anchor_var::Union{Nothing,String} = "X",        # NEW: which var is observed anchor (e.g. X)
-    anchor_token::Union{Nothing,String} = nothing   # NEW: printed token for anchor (e.g. "x'"); if nothing, derive from fixed_obs[anchor_var]
+    queries,
+    var2sym::Dict{String,String},
+)::CFFrac
+    queries === nothing && return fr
+    isempty(output_vars) && return fr
+
+    factor_left = Set{String}()
+    factor_do = Set{String}()
+    for f in factors
+        union!(factor_left, f.left)
+        union!(factor_do, f.dovars)
+    end
+
+    base_disp(V::String) = get(var2sym, V, default_var_symbol(V))
+    star_disp(V::String) = base_disp(V) * "^*"
+
+    lower_to_known = Dict{String,Vector{String}}()
+    for V in union(factor_left, factor_do)
+        push!(get!(lower_to_known, lowercase(V), String[]), V)
+    end
+
+    canonical_var(V::String) = begin
+        if (V in factor_left) || (V in factor_do)
+            V
+        else
+            matches = get(lower_to_known, lowercase(V), String[])
+            length(matches) == 1 ? only(matches) : V
+        end
+    end
+
+    event_left_vars = Set{String}(canonical_var.(output_vars))
+    for q in queries
+        !isempty(getproperty(q, :interventions)) || continue
+        for (V, _) in getproperty(q, :observations)
+            push!(event_left_vars, canonical_var(string(V)))
+        end
+    end
+
+    dual_fixed_vars = Set{String}(intersect(keys(query_obs), keys(query_do)))
+    mix_vars = Set{String}()
+    for V in keys(query_obs)
+        (V in dual_fixed_vars) && continue
+        (V in event_left_vars) && continue
+        # Lift observed roots that are only used as conditioning/intervention context.
+        if (V in factor_left) && any(f -> (V in f.left) && isempty(f.dovars), factors) && (V in factor_do)
+            push!(mix_vars, V)
+        end
+    end
+
+    function rewrite_one(a::CFAtom, in_den::Bool)::CFAtom
+        if length(a.left) == 1 && isempty(a.dovars)
+            V = a.left[1]
+            if V in dual_fixed_vars
+                return CFAtom("1", String[], String[], String[], String[])
+            elseif V in mix_vars
+                return CFAtom(
+                    "P(" * star_disp(V) * ")",
+                    copy(a.left),
+                    String[],
+                    [star_disp(V)],
+                    String[],
+                )
+            end
+        end
+
+        new_left = copy(a.left_disp)
+        for i in eachindex(a.left)
+            V = a.left[i]
+            if V in event_left_vars
+                new_left[i] = base_disp(V)
+            end
+        end
+
+        new_do = copy(a.do_disp)
+        for i in eachindex(a.dovars)
+            V = a.dovars[i]
+            if V in dual_fixed_vars
+                new_do[i] = base_disp(V)
+            elseif V in mix_vars
+                if !in_den && any(L -> L in event_left_vars, a.left)
+                    new_do[i] = base_disp(V)
+                else
+                    new_do[i] = star_disp(V)
+                end
+            end
+        end
+
+        return rebuild_atom(a; left_disp=new_left, do_disp=new_do)
+    end
+
+    num = map_atoms(fr.num, a -> rewrite_one(a, false))
+    den = map_atoms(fr.den, a -> rewrite_one(a, true))
+
+    for V in sort!(collect(mix_vars))
+        num = wrap_sumvar(num, star_disp(V))
+        den = wrap_sumvar(den, star_disp(V))
+    end
+
+    return CFFrac(num, den)
+end
+
+function remember_fixed_assignment!(
+    assignments::Dict{String,String},
+    V::String,
+    token::String,
+    kind::String,
 )
-    # fixed obs/do (for printing)
+    if haskey(assignments, V) && assignments[V] != token
+        error("id_cf_step5: conflicting fixed $kind assignments for $V: $(assignments[V]) vs $token")
+    end
+    assignments[V] = token
+end
+
+function canonicalize_fixed_assignment_keys(
+    assignments::Dict{String,String},
+    known_vars,
+)::Dict{String,String}
+    isempty(assignments) && return assignments
+
+    lower_to_known = Dict{String,Vector{String}}()
+    for V in known_vars
+        push!(get!(lower_to_known, lowercase(V), String[]), V)
+    end
+
+    canon = Dict{String,String}()
+    for (V, token) in assignments
+        target = V
+        if !(V in known_vars)
+            matches = get(lower_to_known, lowercase(V), String[])
+            if length(matches) == 1
+                target = only(matches)
+            end
+        end
+        remember_fixed_assignment!(canon, target, token, "assignment")
+    end
+    return canon
+end
+
+Base.@kwdef struct Step5DisplayConfig
+    symbols::Dict{String,String} = Dict{String,String}()
+    value_rename::Dict{String,String} = Dict("x_hat" => "x'")
+    mode::Symbol = :legacy  # :legacy | :starred_style
+end
+
+Base.@kwdef struct Step5LatentConfig
+    mode::Symbol = :exclude_fixed  # :exclude_fixed | :include_fixed
+    include::Vector{String} = String[]
+end
+
+Base.@kwdef struct Step5RuleConfig
+    enabled::Bool = false
+    directed_edges::Vector{Tuple{String,String}} = Tuple{String,String}[]
+end
+
+Base.@kwdef struct Step5DataConfig
+    mode::Symbol = :none  # :none | :interventions | :conditional_queries
+    mix_var::String = "D"
+    mix_sym::String = "d^*"
+    mix_target_var::String = "Z"
+    anchor_var::Union{Nothing,String} = "X"
+    anchor_token::Union{Nothing,String} = nothing
+    mix_token::Union{Nothing,String} = nothing
+end
+
+Base.@kwdef struct Step5FixedConfig
+    obs::Dict{String,String} = Dict{String,String}()
+    do_assignments::Dict{String,String} = Dict{String,String}()
+end
+
+function scan_step5_boxes(
+    wd::WiringDiagram,
+    value_rename::Dict{String,String},
+)
     fixed_obs = Dict{String,String}()
     fixed_do  = Dict{String,String}()
+    factors = ProbFactor[]
 
     for b in WD.box_ids(wd)
         nm = box_name(wd, b)
+
         if (p = parse_obs(nm)) !== nothing
             V, v = p
-            fixed_obs[V] = get(obs_value_rename, v, v)
+            fixed_obs[V] = get(value_rename, v, v)
         elseif (p = parse_do(nm)) !== nothing
             V, v = p
-            fixed_do[V] = get(do_value_rename, v, v)  # APPLY rename
+            fixed_do[V] = get(value_rename, v, v)
         end
-    end
 
-    # resolve anchor token for rewrite_for_data
-    resolved_anchor_token = anchor_token
-    if resolved_anchor_token === nothing && anchor_var !== nothing
-        if haskey(fixed_obs, anchor_var)
-            resolved_anchor_token = fixed_obs[anchor_var]
-        end
-    end
-
-    # collect factors
-    factors = ProbFactor[]
-    for b in WD.box_ids(wd)
-        nm = box_name(wd, b)
         f = parse_prob_box_name(nm)
         f === nothing && continue
+        isempty(f.left) && continue  # P(∅ ; do(...)) = 1
         push!(factors, f)
     end
 
-    # build product
-    atoms = CFExpr[]
-    for f in factors
-        push!(atoms, factor_to_atom(f, fixed_obs, fixed_do, var2sym))
+    return fixed_obs, fixed_do, factors
+end
+
+function merge_query_fixed_assignments!(
+    fixed_obs::Dict{String,String},
+    fixed_do::Dict{String,String},
+    query_obs_assignments::Dict{String,String},
+    query_do_assignments::Dict{String,String},
+    queries,
+    value_rename::Dict{String,String},
+    manual_fixed_obs::Dict{String,String},
+    manual_fixed_do::Dict{String,String},
+)
+    if queries !== nothing
+        for q in queries
+            for (V, v) in getproperty(q, :observations)
+                token = get(value_rename, string(v), string(v))
+                remember_fixed_assignment!(fixed_obs, string(V), token, "obs")
+                remember_fixed_assignment!(query_obs_assignments, string(V), token, "obs")
+            end
+            for (V, v) in getproperty(q, :interventions)
+                token = get(value_rename, string(v), string(v))
+                remember_fixed_assignment!(fixed_do, string(V), token, "do")
+                remember_fixed_assignment!(query_do_assignments, string(V), token, "do")
+            end
+        end
     end
-    prod = CFProd(atoms)
 
-    # latent var-names
-    all_vars = collect_all_vars(factors)
-    fixed_vars = Set{String}(keys(fixed_obs))
-    union!(fixed_vars, keys(fixed_do))
+    for (V, v) in manual_fixed_obs
+        remember_fixed_assignment!(fixed_obs, V, v, "obs")
+    end
+    for (V, v) in manual_fixed_do
+        remember_fixed_assignment!(fixed_do, V, v, "do")
+    end
+end
+
+function canonicalize_all_assignments(
+    all_vars,
+    fixed_obs::Dict{String,String},
+    fixed_do::Dict{String,String},
+    query_obs_assignments::Dict{String,String},
+    query_do_assignments::Dict{String,String},
+)
+    fixed_obs = canonicalize_fixed_assignment_keys(fixed_obs, all_vars)
+    fixed_do = canonicalize_fixed_assignment_keys(fixed_do, all_vars)
+    query_obs_assignments = canonicalize_fixed_assignment_keys(query_obs_assignments, all_vars)
+    query_do_assignments = canonicalize_fixed_assignment_keys(query_do_assignments, all_vars)
+    return fixed_obs, fixed_do, query_obs_assignments, query_do_assignments
+end
+
+function collect_factor_var_sets(factors::Vector{ProbFactor})
+    left_var_set = Set{String}()
+    do_var_set = Set{String}()
+    for f in factors
+        union!(left_var_set, f.left)
+        union!(do_var_set, f.dovars)
+    end
+    return left_var_set, do_var_set
+end
+
+function prepare_display_sets!(
+    factors::Vector{ProbFactor},
+    fixed_obs::Dict{String,String},
+    fixed_do::Dict{String,String},
+    display_mode::Symbol,
+)
+    left_var_set, do_var_set = collect_factor_var_sets(factors)
+
+    if display_mode == :starred_style
+        # If an intervened root variable only appears in do(...) positions,
+        # synthesize its marginal root factor P(v^*) for starred display mode.
+        for V in sort(collect(keys(fixed_do)))
+            if (V in do_var_set) && !(V in left_var_set)
+                push!(factors, ProbFactor([V], String[]))
+                push!(left_var_set, V)
+            end
+        end
+    end
+
+    star_left_vars = Set{String}()
+    if display_mode == :starred_style
+        for V in left_var_set
+            if (V in do_var_set) || haskey(fixed_obs, V) || haskey(fixed_do, V)
+                push!(star_left_vars, V)
+            end
+        end
+    end
+
+    return star_left_vars
+end
+
+function choose_latent_vars(
+    all_vars,
+    output_vars::Vector{String},
+    fixed_obs::Dict{String,String},
+    fixed_do::Dict{String,String},
+    force_latent::Vector{String},
+    latent_mode::Symbol,
+)
+    latent_mode in (:exclude_fixed, :include_fixed) ||
+        error("id_cf_step5: unsupported latent.mode=$latent_mode")
+
+    fixed_vars = Set{String}()
+    if latent_mode == :exclude_fixed
+        union!(fixed_vars, keys(fixed_obs))
+        union!(fixed_vars, keys(fixed_do))
+    end
+
     out_set = Set{String}(output_vars)
-
     latent = String[]
     for v in all_vars
         if !(v in out_set) && !(v in fixed_vars)
@@ -1113,13 +1505,125 @@ function id_cf_step5(
         v in latent || push!(latent, v)
     end
     sort!(latent)
+    return latent
+end
 
-    # numerator = Σ_latent ∏ factors
-    num_sumvars_vars = copy(latent)
+function maybe_apply_algebraic_rules(
+    prod::CFProd,
+    sumvars::Vector{String},
+    enable_rules::Bool,
+    directed_edges::Vector{Tuple{String,String}},
+)
+    enable_rules || return prod, sumvars
+
+    if !isempty(directed_edges)
+        atoms = CFAtom[t for t in prod.terms if t isa CFAtom]
+        atoms = rule_drop_do!(atoms, directed_edges)
+        prod = CFProd(CFExpr[a for a in atoms])
+    end
+    return rule_eliminate_sum_normalized!(prod, sumvars)
+end
+
+# =========================
+# Step 5 main
+# =========================
+"""
+id_cf_step5:
+
+- `display` controls symbol mapping/value labels/rendering mode
+- `latent` controls latent-variable selection policy
+- `rules` controls optional algebraic rewrite rules
+- `data` controls optional data-availability rewrites
+- `fixed` injects explicit fixed obs/do assignments
+
+Core workflow:
+1. Extract P(...) factors and fixed obs/do labels from Step4 output.
+2. Build normalized fraction:
+     num = Σ_latent ∏ factors
+     den = Σ_{output_vars, latent} ∏ factors
+3. Apply optional simplification/rules/rewrite layers.
+"""
+function id_cf_step5(
+    wd::WiringDiagram;
+    output_vars::Vector{String},
+    simplify::Bool = true,
+    queries=nothing,
+    display::Step5DisplayConfig = Step5DisplayConfig(),
+    latent::Step5LatentConfig = Step5LatentConfig(),
+    rules::Step5RuleConfig = Step5RuleConfig(),
+    data::Step5DataConfig = Step5DataConfig(),
+    fixed::Step5FixedConfig = Step5FixedConfig(),
+)
+    display.mode in (:legacy, :starred_style) ||
+        error("id_cf_step5: unsupported display.mode=$(display.mode)")
+    latent.mode in (:exclude_fixed, :include_fixed) ||
+        error("id_cf_step5: unsupported latent.mode=$(latent.mode)")
+    data.mode in (:none, :interventions, :conditional_queries) ||
+        error("id_cf_step5: unsupported data.mode=$(data.mode)")
+
+    var2sym = display.symbols
+    value_rename = display.value_rename
+
+    query_obs_assignments = Dict{String,String}()
+    query_do_assignments = Dict{String,String}()
+
+    fixed_obs, fixed_do, factors = scan_step5_boxes(wd, value_rename)
+    merge_query_fixed_assignments!(
+        fixed_obs,
+        fixed_do,
+        query_obs_assignments,
+        query_do_assignments,
+        queries,
+        value_rename,
+        fixed.obs,
+        fixed.do_assignments,
+    )
+
+    resolved_anchor_token = data.anchor_token
+    if resolved_anchor_token === nothing && data.anchor_var !== nothing
+        if haskey(fixed_obs, data.anchor_var)
+            resolved_anchor_token = fixed_obs[data.anchor_var]
+        end
+    end
+
+    resolved_mix_token = data.mix_token
+    if resolved_mix_token === nothing
+        if haskey(fixed_do, data.mix_var)
+            resolved_mix_token = fixed_do[data.mix_var]
+        else
+            resolved_mix_token = get(var2sym, data.mix_var, lowercase(data.mix_var))
+        end
+    end
+
+    all_vars = collect_all_vars(factors)
+    fixed_obs, fixed_do, query_obs_assignments, query_do_assignments =
+        canonicalize_all_assignments(all_vars, fixed_obs, fixed_do, query_obs_assignments, query_do_assignments)
+
+    star_left_vars = prepare_display_sets!(factors, fixed_obs, fixed_do, display.mode)
+
+    atoms = CFExpr[]
+    for f in factors
+        push!(atoms, factor_to_atom(
+            f, fixed_obs, fixed_do, var2sym;
+            display_mode=display.mode,
+            star_left_vars=star_left_vars,
+        ))
+    end
+    prod = CFProd(atoms)
+
+    latent_vars = choose_latent_vars(
+        all_vars,
+        output_vars,
+        fixed_obs,
+        fixed_do,
+        latent.include,
+        latent.mode,
+    )
+
+    num_sumvars_vars = copy(latent_vars)
     num_prod = prod
 
-    # denominator = Σ_{output_vars, latent} ∏ factors
-    den_sumvars_vars = vcat(copy(output_vars), latent)
+    den_sumvars_vars = vcat(copy(output_vars), latent_vars)
     den_prod = prod
 
     if simplify
@@ -1127,18 +1631,18 @@ function id_cf_step5(
         den_prod, den_sumvars_vars = simplify_sum(den_prod, den_sumvars_vars)
     end
 
-    if enable_cfid_rules
-        if !isempty(directed_edges)
-            num_atoms = CFAtom[t for t in num_prod.terms if t isa CFAtom]
-            den_atoms = CFAtom[t for t in den_prod.terms if t isa CFAtom]
-            num_atoms = rule_drop_do!(num_atoms, directed_edges)
-            den_atoms = rule_drop_do!(den_atoms, directed_edges)
-            num_prod = CFProd(CFExpr[a for a in num_atoms])
-            den_prod = CFProd(CFExpr[a for a in den_atoms])
-        end
-        num_prod, num_sumvars_vars = rule_eliminate_sum_normalized!(num_prod, num_sumvars_vars)
-        den_prod, den_sumvars_vars = rule_eliminate_sum_normalized!(den_prod, den_sumvars_vars)
-    end
+    num_prod, num_sumvars_vars = maybe_apply_algebraic_rules(
+        num_prod,
+        num_sumvars_vars,
+        rules.enabled,
+        rules.directed_edges,
+    )
+    den_prod, den_sumvars_vars = maybe_apply_algebraic_rules(
+        den_prod,
+        den_sumvars_vars,
+        rules.enabled,
+        rules.directed_edges,
+    )
 
     sum_symbol(v::String) = get(var2sym, v, default_var_symbol(v))
     num_sumvars = sum_symbol.(num_sumvars_vars)
@@ -1147,30 +1651,51 @@ function id_cf_step5(
     num_expr = isempty(num_sumvars) ? num_prod : CFSum(num_sumvars, num_prod)
     den_expr = isempty(den_sumvars) ? den_prod : CFSum(den_sumvars, den_prod)
 
-    raw_frac = CFFrac(num_expr, den_expr)
-    raw_tex  = cf_latex(raw_frac)
+    event_mode = isempty(output_vars)
+    raw_expr = event_mode ? num_expr : CFFrac(num_expr, den_expr)
+    raw_tex  = cf_latex(raw_expr)
 
-    # simplified currently same as raw
-    simp_frac = raw_frac
+    simp_expr = raw_expr
     simp_tex  = raw_tex
 
-    # Optional data rewrite (generic)
-    zv = mix_target_var
+    zv = data.mix_target_var
     z_sym = get(var2sym, zv, lowercase(zv))
 
-    data_frac = rewrite_for_data(
-        simp_frac;
-        data_mode=data_mode,
-        mix_var=mix_var,
-        mix_sym=mix_sym,
-        z_var=zv,
-        z_sym=z_sym,
-        obs_token=resolved_anchor_token
-    )
-    data_tex = cf_latex(data_frac)
+    if event_mode || data.mode == :none
+        data_expr = simp_expr
+    elseif data.mode == :conditional_queries
+        simp_expr isa CFFrac || error("id_cf_step5: :conditional_queries requires a fractional expression")
+        data_expr = rewrite_conditional_queries(
+            simp_expr::CFFrac,
+            factors,
+            fixed_obs,
+            fixed_do,
+            query_obs_assignments,
+            query_do_assignments,
+            output_vars,
+            queries,
+            var2sym,
+        )
+    else
+        data_expr = rewrite_for_data(
+            simp_expr;
+            data_mode=data.mode,
+            mix_var=data.mix_var,
+            mix_sym=data.mix_sym,
+            z_var=zv,
+            z_sym=z_sym,
+            obs_token=resolved_anchor_token,
+            mix_token=resolved_mix_token,
+            anchor_is_mix=(
+                data.anchor_var !== nothing &&
+                data.anchor_var == data.mix_var
+            )
+        )
+    end
+    data_tex = cf_latex(data_expr)
 
     return (
-        raw_frac = raw_frac,
+        raw_frac = raw_expr,
         raw_tex = raw_tex,
         simplified_tex = simp_tex,
         data_tex = data_tex

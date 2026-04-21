@@ -1,0 +1,17 @@
+impl=r_struct benchmark_config repeats=4 warmups=2 timer=Sys.time
+impl=r_struct family=chain n=8 ok=TRUE warm_total_median_ms=49.125 warm_setup_median_ms=13.147 warm_identify_median_ms=35.515
+impl=r_struct family=chain n=16 ok=TRUE warm_total_median_ms=137.795 warm_setup_median_ms=36.641 warm_identify_median_ms=98.268
+impl=r_struct family=chain n=24 ok=TRUE warm_total_median_ms=372.461 warm_setup_median_ms=42.559 warm_identify_median_ms=331.125
+impl=r_struct family=chain n=32 ok=TRUE warm_total_median_ms=963.694 warm_setup_median_ms=62.338 warm_identify_median_ms=901.336
+impl=r_struct family=fanin n=8 ok=TRUE warm_total_median_ms=86.395 warm_setup_median_ms=23.995 warm_identify_median_ms=55.900
+impl=r_struct family=fanin n=16 ok=TRUE warm_total_median_ms=172.354 warm_setup_median_ms=64.238 warm_identify_median_ms=110.128
+impl=r_struct family=fanin n=24 ok=TRUE warm_total_median_ms=416.498 warm_setup_median_ms=78.541 warm_identify_median_ms=332.337
+impl=r_struct family=fanin n=32 ok=TRUE warm_total_median_ms=891.755 warm_setup_median_ms=111.898 warm_identify_median_ms=779.834
+impl=r_struct family=dense n=8 ok=TRUE warm_total_median_ms=56.418 warm_setup_median_ms=22.116 warm_identify_median_ms=30.729
+impl=r_struct family=dense n=16 ok=TRUE warm_total_median_ms=183.563 warm_setup_median_ms=85.640 warm_identify_median_ms=98.226
+impl=r_struct family=dense n=24 ok=TRUE warm_total_median_ms=525.463 warm_setup_median_ms=189.605 warm_identify_median_ms=347.643
+impl=r_struct family=dense n=32 ok=TRUE warm_total_median_ms=1408.743 warm_setup_median_ms=399.327 warm_identify_median_ms=973.114
+impl=r_struct family=chain_bi n=8 ok=TRUE warm_total_median_ms=40.802 warm_setup_median_ms=26.469 warm_identify_median_ms=14.381
+impl=r_struct family=chain_bi n=16 ok=TRUE warm_total_median_ms=95.183 warm_setup_median_ms=52.039 warm_identify_median_ms=43.445
+impl=r_struct family=chain_bi n=24 ok=TRUE warm_total_median_ms=199.616 warm_setup_median_ms=99.208 warm_identify_median_ms=98.498
+impl=r_struct family=chain_bi n=32 ok=TRUE warm_total_median_ms=389.396 warm_setup_median_ms=145.774 warm_identify_median_ms=235.371

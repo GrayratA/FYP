@@ -40,6 +40,16 @@ function has_any_box_with_prefix(wd::WiringDiagram, prefix::String)::Bool
     end
     return false
 end
+
+function count_boxes_by_name(wd::WiringDiagram, name::Symbol)::Int
+    count = 0
+    for b in WD.box_ids(wd)
+        b == WD.input_id(wd)  && continue
+        b == WD.output_id(wd) && continue
+        WD.box(wd, b).value == name && (count += 1)
+    end
+    return count
+end
 # ----------------------------------------
 
 
@@ -64,6 +74,7 @@ end
 
     wd = build_multiverse(base, queries)
     drop_discard_branches!(wd)
+    separate_sharp_effect_copy_maps!(wd)
     merge_identical_deterministic_boxes(wd)
     replace_fx_with_cx!(wd)
 
@@ -75,17 +86,17 @@ end
 
     # 3) expected boxes exist (names exactly as your print)
     expected_boxes = [
-        :cUY,
-        :cUX,
+        Symbol("c_Y"),
+        Symbol("c_X"),
         Symbol("obs_X=x0"),
         Symbol("obs_D=d"),
-        :doZ,
+        Symbol("do_Z=z"),
         Symbol("do_D=d"),
-        :cUD,
-        :cUR,
-        :cUW,
+        Symbol("c_D"),
+        Symbol("c_R"),
+        Symbol("c_W"),
         Symbol("obs_Z=z"),
-        :cUZ,
+        Symbol("c_Z"),
         Symbol("do_X=x"),
     ]
 
@@ -94,19 +105,19 @@ end
     end
 
     # 4) spot-check port signatures (match your print)
-    cUY = box_id_by_name(wd, :cUY)
+    cUY = box_id_by_name(wd, Symbol("c_Y"))
     @test WD.input_ports(wd, cUY)  == Any[:R, :W, :Z]
     @test WD.output_ports(wd, cUY) == Any[:Y]
 
-    cUX = box_id_by_name(wd, :cUX)
+    cUX = box_id_by_name(wd, Symbol("c_X"))
     @test WD.input_ports(wd, cUX)  == Any[:R]
     @test WD.output_ports(wd, cUX) == Any[:X]
 
-    cUW = box_id_by_name(wd, :cUW)
+    cUW = box_id_by_name(wd, Symbol("c_W"))
     @test WD.input_ports(wd, cUW)  == Any[:X]
     @test WD.output_ports(wd, cUW) == Any[:W]
 
-    cUZ = box_id_by_name(wd, :cUZ)
+    cUZ = box_id_by_name(wd, Symbol("c_Z"))
     @test WD.input_ports(wd, cUZ)  == Any[:D]
     @test WD.output_ports(wd, cUZ) == Any[:Z]
 
@@ -115,13 +126,13 @@ end
 
     doD = box_id_by_name(wd, Symbol("do_D=d"))
     doX = box_id_by_name(wd, Symbol("do_X=x"))
-    doZ_id = box_id_by_name(wd, :doZ)
+    doZ_id = box_id_by_name(wd, Symbol("do_Z=z"))
 
-    cUD = box_id_by_name(wd, :cUD)
-    cUR = box_id_by_name(wd, :cUR)
-    cUX = box_id_by_name(wd, :cUX)
-    cUW = box_id_by_name(wd, :cUW)
-    cUZ = box_id_by_name(wd, :cUZ)
+    cUD = box_id_by_name(wd, Symbol("c_D"))
+    cUR = box_id_by_name(wd, Symbol("c_R"))
+    cUX = box_id_by_name(wd, Symbol("c_X"))
+    cUW = box_id_by_name(wd, Symbol("c_W"))
+    cUZ = box_id_by_name(wd, Symbol("c_Z"))
     obsX = box_id_by_name(wd, Symbol("obs_X=x0"))
     obsD = box_id_by_name(wd, Symbol("obs_D=d"))
     obsZ = box_id_by_name(wd, Symbol("obs_Z=z"))
@@ -139,4 +150,29 @@ end
 
     # 6) optional strict check: wire count matches your print (=10)
     @test length(WD.wires(wd)) == 10
+end
+
+@testset "replace_fx_with_cx! keeps shared lambda inputs unabsorbed" begin
+    wd = WiringDiagram([], Any[:Y])
+
+    puY = WD.add_box!(wd, Box(:PU_Y, Any[], Any[:UY]))
+    doX = WD.add_box!(wd, Box(Symbol("do_X=x"), Any[], Any[:X]))
+    obsY = WD.add_box!(wd, Box(Symbol("obs_Y=y"), Any[:Y], Any[]))
+    fY1 = WD.add_box!(wd, Box(:f_Y, Any[:X, :UY], Any[:Y]))
+    fY2 = WD.add_box!(wd, Box(:f_Y, Any[:X, :UY], Any[:Y]))
+
+    WD.add_wire!(wd, (puY, 1) => (fY1, 2))
+    WD.add_wire!(wd, (puY, 1) => (fY2, 2))
+    WD.add_wire!(wd, (doX, 1) => (fY1, 1))
+    WD.add_wire!(wd, (doX, 1) => (fY2, 1))
+    WD.add_wire!(wd, (fY1, 1) => (WD.output_id(wd), 1))
+    WD.add_wire!(wd, (fY2, 1) => (obsY, 1))
+
+    replace_fx_with_cx!(wd)
+
+    # The shared λ_Y fans out to two occurrences of f_Y, so simplify-cf step 4
+    # must leave them untouched.
+    @test count_boxes_by_name(wd, :f_Y) == 2
+    @test count_boxes_by_name(wd, Symbol("c_Y")) == 0
+    @test has_any_box_with_prefix(wd, "f_")
 end

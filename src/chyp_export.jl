@@ -23,6 +23,14 @@ function parse_do_label(s::AbstractString)
     m === nothing ? nothing : (m.captures[1], m.captures[2])
 end
 
+function parse_generic_do_label(s::AbstractString)
+    m = match(r"^do_(.*)$", s)
+    if m === nothing || occursin("=", s)
+        return nothing
+    end
+    return m.captures[1]
+end
+
 function parse_obs_label(s::AbstractString)
     m = match(r"^obs_(.*)=(.*)$", s)
     m === nothing ? nothing : (m.captures[1], m.captures[2])
@@ -57,6 +65,9 @@ function preferred_chyp_box_name(raw_name::AbstractString)
     do_label = parse_do_label(raw_name)
     do_label !== nothing && return sanitize_ident("do_" * do_label[2])
 
+    generic_do_label = parse_generic_do_label(raw_name)
+    generic_do_label !== nothing && return sanitize_ident("do_" * generic_do_label)
+
     obs_label = parse_obs_label(raw_name)
     obs_label !== nothing && return sanitize_ident(obs_label[2])
 
@@ -64,7 +75,8 @@ function preferred_chyp_box_name(raw_name::AbstractString)
 end
 
 function preferred_chyp_box_colors(raw_name::AbstractString)
-    parse_do_label(raw_name) !== nothing && return ("FFD166", "")
+    (parse_do_label(raw_name) !== nothing || parse_generic_do_label(raw_name) !== nothing) &&
+        return ("FFD166", "")
     parse_obs_label(raw_name) !== nothing && return ("7FDBFF", "")
     return ("", "")
 end

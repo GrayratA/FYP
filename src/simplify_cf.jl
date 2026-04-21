@@ -47,30 +47,143 @@ function drop_discard_branches!(wd::WiringDiagram)
 end
 
 # merge identical deterministic boxes
+function sharp_state_name_from_effects(wd::WiringDiagram, ws, var_type::Symbol)
+    effect_names = Symbol[]
+    for w in ws
+        is_sharp_effect(wd, w.target.box) || continue
+        n = safe_box_name(wd, w.target.box)
+        n isa Symbol && push!(effect_names, n)
+    end
+
+    unique_names = unique(effect_names)
+    if length(unique_names) == 1
+        only_name = only(unique_names)
+        m = match(r"^obs_(.*)=(.*)$", String(only_name))
+        if m !== nothing
+            V, v = m.captures
+            V == String(var_type) && return Symbol("do_", V, "=", v)
+        end
+    end
+
+    return canonical_do_name(var_type)
+end
+
+function separate_sharp_effect_fanout_once!(wd::WiringDiagram; source_boxes=nothing)
+    changed = false
+
+    boxes =
+        source_boxes === nothing ?
+        collect(1:WD.nboxes(wd)) :
+        [b for b in unique(source_boxes) if 1 <= b <= WD.nboxes(wd)]
+
+    for b in boxes
+        for j in 1:nout(wd, b)
+            ws = copy(out_wires(wd, b, j))
+            length(ws) > 1 || continue
+
+            sharp_ws = [w for w in ws if is_sharp_effect(wd, w.target.box)]
+            isempty(sharp_ws) && continue
+
+            var_type = port_value(wd, first(sharp_ws).target)
+            nonsharp_ws = [
+                w for w in ws
+                if !(is_sharp_effect(wd, w.target.box) && port_value(wd, w.target) == var_type)
+            ]
+            isempty(nonsharp_ws) && continue
+
+            do_name = sharp_state_name_from_effects(wd, sharp_ws, var_type)
+            do_box_id = WD.add_box!(wd, Box(do_name, Any[], Any[var_type]))
+
+            for w in nonsharp_ws
+                tgt_box = w.target.box
+                tgt_in_idx = w.target.port
+                WD.rem_wire!(wd, w)
+                WD.add_wire!(wd, (do_box_id, 1) => (tgt_box, tgt_in_idx))
+            end
+
+            changed = true
+        end
+    end
+
+    return changed
+end
+
+function separate_sharp_effect_copy_maps!(wd::WiringDiagram; source_boxes=nothing)
+    changed = true
+    while changed
+        changed = separate_sharp_effect_fanout_once!(wd; source_boxes=source_boxes)
+    end
+    remove_lonely_boxes!(wd)
+    return wd
+end
+
+# Split do-box fanout for visualization:
+# if one do_* box feeds multiple targets, clone it so each clone feeds exactly one target.
+# This preserves semantics and removes junction copy nodes caused by do-box fanout.
+function split_do_fanout!(wd::WiringDiagram)
+    changed = true
+    while changed
+        changed = false
+        # Snapshot current ids because we may add boxes during iteration.
+        for b in collect(WD.box_ids(wd))
+            b <= 0 && continue
+            is_sharp_state(wd, b) || continue
+            nout(wd, b) == 1 || continue
+
+            ws = copy(out_wires(wd, b, 1))
+            length(ws) > 1 || continue
+
+            # Keep the first outgoing edge on original box; clone for the rest.
+            for w in ws[2:end]
+                tgt_box = w.target.box
+                tgt_port = w.target.port
+
+                do_name = safe_box_name(wd, b)
+                out_types = copy(output_ports(wd, b))
+                do_clone = WD.add_box!(wd, Box(do_name, Any[], out_types))
+
+                WD.rem_wire!(wd, w)
+                WD.add_wire!(wd, (do_clone, 1) => (tgt_box, tgt_port))
+            end
+
+            changed = true
+        end
+    end
+
+    remove_lonely_boxes!(wd)
+    return wd
+end
+
 function merge_identical_deterministic_boxes(wd::WiringDiagram)
     flag = true
     while flag
         flag = false
-        same_name_boxes = find_same_name_boxes(wd)
-        for (name, boxes) in same_name_boxes
+
+        # Eq.(6)-style separation step:
+        # whenever a sharp effect is connected to a copy map (fanout), separate
+        # the involved wires before attempting deterministic-box merging.
+        before_sep = length(box_ids(wd)) + length(wires(wd))
+        separate_sharp_effect_copy_maps!(wd)
+        after_sep = length(box_ids(wd)) + length(wires(wd))
+        flag = flag || (after_sep != before_sep)
+
+        for (name, boxes) in duplicate_mechanism_groups(wd)
             # group boxes by input source set
-            groups = Dict{Set{Symbol}, Vector{Int}}()
+            groups = Dict{Any, Vector{Int}}()
             for b in boxes
-                S = input_sources_set(wd, b)
+                S = merge_signature(wd, b)
                 push!(get!(groups, S, Int[]), b)
             end
             filter!(kv -> length(kv[2]) > 1, groups)  # remove groups with only one box
-            # println(groups)
             if isempty(groups)
-                flag = false
                 continue
             end
-            sub_groups = Set{Int}()
             # merge boxes in each group
+            merged_keeps = Int[]
             for (S, bs) in groups
                 sorted_bs = sort(bs)
                 b_keep = first(sorted_bs)
-                push!(sub_groups, b_keep)
+                merged_here = false
                 for dup in Iterators.reverse(sorted_bs[2:end])
                     for w in out_wires(wd, dup)
                         src_out_idx = w.source.port
@@ -85,44 +198,16 @@ function merge_identical_deterministic_boxes(wd::WiringDiagram)
                     end
                     WD.rem_box!(wd, dup)
                     flag = true
+                    merged_here = true
                 end
+                merged_here && push!(merged_keeps, b_keep)
             end
-            # println(1)
-            for i in sub_groups
-                sharpEffectGroup = Set{Symbol}()
-                if length(output_ports(wd, i)) == 1
-                    for j in 1:length(output_ports(wd, i))
-                        ws = out_wires(wd, i, j)
-                        if length(ws) > 1
-                            for w in ws
-                                tgt_box = w.target.box
-                                if is_sharp_effect(wd, tgt_box)
-                                    push!(sharpEffectGroup, port_value(wd, w.target))
-                                end
-                            end
-                        end
-                        if length(sharpEffectGroup) > 0
-                            var_type = first(collect(sharpEffectGroup))
-                            for w in ws
-                                if port_value(wd, w.target) != var_type || !is_sharp_effect(wd, w.target.box)
-                                    tgt_box = w.target.box
-                                    tgt_in_idx = w.target.port
-                                    WD.rem_wire!(wd, w)
-                                    do_box = Box(Symbol("do" * String(var_type)), Any[], Any[var_type])
-                                    do_box_id = WD.add_box!(wd, do_box)
-                                    WD.add_wire!(wd, (do_box_id, 1) => (w.target.box, tgt_in_idx))
-                                else
-                                    tgt_box = w.target.box
-                                    tgt_in_idx = w.target.port
-                                    src_out_idx = w.source.port
-                                    WD.rem_wire!(wd, w)
-                                    WD.add_wire!(wd, (i, src_out_idx) => (tgt_box, tgt_in_idx))
-                                end
-                            end    
-                        end
-                    end
-                end
-                flag = true
+
+            if !isempty(merged_keeps)
+                before = length(box_ids(wd)) + length(wires(wd))
+                separate_sharp_effect_copy_maps!(wd; source_boxes=merged_keeps)
+                after = length(box_ids(wd)) + length(wires(wd))
+                flag = flag || (after != before)
             end
         end
         
@@ -148,22 +233,15 @@ function replace_fx_with_cx!(wd::WiringDiagram)
             nin_b = nin(wd, b)
             nin_b == 0 && continue
 
-            kept_input_indices = Int[]
-            has_state_input = false
+            state_ports = state_input_ports(wd, b)
+            isempty(state_ports) && continue
 
-            for j in 1:nin_b
-                ws = in_wires(wd, b, j)
+            # Paper step 4 only applies when λ_X is fed directly into f_X,
+            # not when the same state is still shared across multiple worlds.
+            lambda_is_directly_fed(wd, b) || continue
 
-                #If any wire of this port comes from the state box, it is considered a "λ input"
-                if any(is_state_box(wd, w.source.box) for w in ws)
-                    has_state_input = true
-                else
-                    push!(kept_input_indices, j)
-                end
-            end
-
-            # If this f_box has no λ-state input, it is not the target of step 4.
-            has_state_input || continue
+            state_port_set = Set(state_ports)
+            kept_input_indices = [j for j in 1:nin_b if !(j in state_port_set)]
 
             old_in_types  = input_ports(wd, b)
             old_out_types = output_ports(wd, b)
@@ -171,17 +249,18 @@ function replace_fx_with_cx!(wd::WiringDiagram)
             new_in_types = Any[ old_in_types[j] for j in kept_input_indices ]
             new_out_types = copy(old_out_types)
             state_syms = Symbol[]
-            for j in 1:nin_b
+            for j in state_ports
                 for w in in_wires(wd, b, j)
-                    if is_state_box(wd, w.source.box)
-                        v = port_value(wd, w.source)
-                        v isa Symbol && push!(state_syms, v)
-                    end
+                    v = port_value(wd, w.source)
+                    v isa Symbol && push!(state_syms, v)
                 end
             end
             isempty(state_syms) && continue
-            v = first(state_syms)
-            cname = Symbol("c" * String(v))
+            unique_state_syms = unique(state_syms)
+            length(unique_state_syms) == 1 || continue
+
+            mech_var = Symbol(replace(String(n), "f_" => ""))
+            cname = canonical_c_name(mech_var)
 
             # create new "c_box"
             c_box = Box(cname, new_in_types, new_out_types)

@@ -19,6 +19,18 @@ function box_id_by_name(wd::WiringDiagram, name::Symbol)::Int
     error("Box $name not found")
 end
 
+function box_ids_by_name(wd::WiringDiagram, name::Symbol)::Vector{Int}
+    ids = Int[]
+    for b in WD.box_ids(wd)
+        b == WD.input_id(wd)  && continue
+        b == WD.output_id(wd) && continue
+        if WD.box(wd, b).value == name
+            push!(ids, b)
+        end
+    end
+    return ids
+end
+
 function has_wire_pair(wd::WiringDiagram, src::Tuple{Int,Int}, tgt::Tuple{Int,Int})::Bool
     for w in WD.wires(wd)
         if (w.source.box, w.source.port) == src &&
@@ -75,6 +87,7 @@ end
 
     wd = build_multiverse(base_scm, queries)
     drop_discard_branches!(wd)
+    separate_sharp_effect_copy_maps!(wd)
     merge_identical_deterministic_boxes(wd)
     replace_fx_with_cx!(wd)
 
@@ -86,11 +99,11 @@ end
 
     # 3) boxes must exist (exact names from your printed simplified_wd)
     obsBb = box_id_by_name(wd, Symbol("obs_B=b"))
-    cUS   = box_id_by_name(wd, :cUS)
-    doB   = box_id_by_name(wd, Symbol("do_B=doB"))
-    cUC   = box_id_by_name(wd, :cUC)
-    cUA   = box_id_by_name(wd, :cUA)
-    cUB   = box_id_by_name(wd, :cUB)
+    cUS   = box_id_by_name(wd, Symbol("c_S"))
+    doBs  = box_ids_by_name(wd, Symbol("do_B=doB"))
+    cUC   = box_id_by_name(wd, Symbol("c_C"))
+    cUA   = box_id_by_name(wd, Symbol("c_A"))
+    cUB   = box_id_by_name(wd, Symbol("c_B"))
 
     # 4) port signatures must match your printed WD
     @test WD.input_ports(wd, obsBb) == Any[:B]
@@ -99,8 +112,9 @@ end
     @test WD.input_ports(wd, cUS) == Any[:C, :B]
     @test WD.output_ports(wd, cUS) == Any[:S]
 
-    @test WD.input_ports(wd, doB) == Any[]
-    @test WD.output_ports(wd, doB) == Any[:B]
+    @test !isempty(doBs)
+    @test all(WD.input_ports(wd, b) == Any[] for b in doBs)
+    @test all(WD.output_ports(wd, b) == Any[:B] for b in doBs)
 
     @test WD.input_ports(wd, cUC) == Any[:A]
     @test WD.output_ports(wd, cUC) == Any[:C]
@@ -115,15 +129,107 @@ end
     out_id = WD.output_id(wd)
 
     @test has_wire_pair(wd, (cUC,1), (cUS,1))        # (4,1) => (2,1)
-    @test has_wire_pair(wd, (doB,1), (cUS,2))        # (3,1) => (2,2)
+    @test any(has_wire_pair(wd, (b,1), (cUS,2)) for b in doBs)
     @test has_wire_pair(wd, (cUA,1), (cUC,1))        # (5,1) => (4,1)
     @test has_wire_pair(wd, (cUA,1), (cUB,1))        # (5,1) => (6,1)
     @test has_wire_pair(wd, (cUB,1), (obsBb,1))      # (6,1) => (1,1)
-    @test has_wire_pair(wd, (doB,1), (out_id,1))     # (3,1) => (-1,1)
+    @test any(has_wire_pair(wd, (b,1), (out_id,1)) for b in doBs)
     @test has_wire_pair(wd, (cUS,1), (out_id,2))     # (2,1) => (-1,2)
 
     # 6) strict wire count
     @test length(WD.wires(wd)) == 7
+end
+
+@testset "simplify-cf step2 separates sharp effects before merge" begin
+    wd = WiringDiagram([], Any[:Y])
+
+    cX   = WD.add_box!(wd, Box(:c_X, Any[], Any[:X]))
+    fY   = WD.add_box!(wd, Box(:f_Y, Any[:X], Any[:Y]))
+    obsX = WD.add_box!(wd, Box(Symbol("obs_X=x"), Any[:X], Any[]))
+
+    WD.add_wire!(wd, (cX, 1) => (fY, 1))
+    WD.add_wire!(wd, (cX, 1) => (obsX, 1))
+    WD.add_wire!(wd, (fY, 1) => (WD.output_id(wd), 1))
+
+    separate_sharp_effect_copy_maps!(wd)
+
+    doX = box_id_by_name(wd, Symbol("do_X=x"))
+
+    @test has_wire_pair(wd, (cX, 1), (obsX, 1))
+    @test has_wire_pair(wd, (doX, 1), (fY, 1))
+    @test !has_wire_pair(wd, (cX, 1), (fY, 1))
+end
+
+@testset "split_do_fanout! clones do-box for each outgoing edge" begin
+    wd = WiringDiagram([], Any[])
+
+    doW = WD.add_box!(wd, Box(Symbol("do_W=w"), Any[], Any[:W]))
+    fT  = WD.add_box!(wd, Box(:f_T, Any[:W], Any[:T]))
+    fM  = WD.add_box!(wd, Box(:f_M, Any[:W], Any[:M]))
+
+    WD.add_wire!(wd, (doW, 1) => (fT, 1))
+    WD.add_wire!(wd, (doW, 1) => (fM, 1))
+
+    @test length(out_wires(wd, doW, 1)) == 2
+
+    split_do_fanout!(wd)
+
+    do_boxes = [
+        b for b in WD.box_ids(wd)
+        if begin
+            n = safe_box_name(wd, b)
+            n == Symbol("do_W=w")
+        end
+    ]
+    @test length(do_boxes) == 2
+    @test all(length(out_wires(wd, b, 1)) == 1 for b in do_boxes)
+
+    @test any(has_wire_pair(wd, (b, 1), (fT, 1)) for b in do_boxes)
+    @test any(has_wire_pair(wd, (b, 1), (fM, 1)) for b in do_boxes)
+end
+
+@testset "merge_identical_deterministic_boxes does not split plain do fanout by default" begin
+    wd = WiringDiagram([], Any[])
+
+    doW = WD.add_box!(wd, Box(Symbol("do_W=w"), Any[], Any[:W]))
+    fT  = WD.add_box!(wd, Box(:f_T, Any[:W], Any[:T]))
+    fM  = WD.add_box!(wd, Box(:f_M, Any[:W], Any[:M]))
+
+    WD.add_wire!(wd, (doW, 1) => (fT, 1))
+    WD.add_wire!(wd, (doW, 1) => (fM, 1))
+
+    merge_identical_deterministic_boxes(wd)
+
+    do_boxes = [
+        b for b in WD.box_ids(wd)
+        if begin
+            n = safe_box_name(wd, b)
+            n == Symbol("do_W=w")
+        end
+    ]
+    @test length(do_boxes) == 1
+    @test length(out_wires(wd, only(do_boxes), 1)) == 2
+    @test has_wire_pair(wd, (only(do_boxes), 1), (fT, 1))
+    @test has_wire_pair(wd, (only(do_boxes), 1), (fM, 1))
+end
+
+@testset "merge_identical_deterministic_boxes applies sharp-effect copy-map separation" begin
+    wd = WiringDiagram([], Any[:Y])
+
+    cX   = WD.add_box!(wd, Box(:c_X, Any[], Any[:X]))
+    fY   = WD.add_box!(wd, Box(:f_Y, Any[:X], Any[:Y]))
+    obsX = WD.add_box!(wd, Box(Symbol("obs_X=x"), Any[:X], Any[]))
+
+    WD.add_wire!(wd, (cX, 1) => (fY, 1))
+    WD.add_wire!(wd, (cX, 1) => (obsX, 1))
+    WD.add_wire!(wd, (fY, 1) => (WD.output_id(wd), 1))
+
+    merge_identical_deterministic_boxes(wd)
+
+    doX = box_id_by_name(wd, Symbol("do_X=x"))
+    @test has_wire_pair(wd, (cX, 1), (obsX, 1))
+    @test has_wire_pair(wd, (doX, 1), (fY, 1))
+    @test !has_wire_pair(wd, (cX, 1), (fY, 1))
 end
 
 @testset "simplify-cf end-to-end: drug example" begin
@@ -167,6 +273,7 @@ end
 
     simplified_wd = full_wd
     drop_discard_branches!(simplified_wd)
+    separate_sharp_effect_copy_maps!(simplified_wd)
     merge_identical_deterministic_boxes(simplified_wd)
     replace_fx_with_cx!(simplified_wd)
 
@@ -177,17 +284,17 @@ end
     @test !has_any_box_with_prefix(simplified_wd, "f_")
 
     # 3) boxes must exist (exact names from your expected printed WD)
-    cUY   = box_id_by_name(simplified_wd, :cUY)
-    cUX   = box_id_by_name(simplified_wd, :cUX)
+    cUY   = box_id_by_name(simplified_wd, Symbol("c_Y"))
+    cUX   = box_id_by_name(simplified_wd, Symbol("c_X"))
     obsXx = box_id_by_name(simplified_wd, Symbol("obs_X=x"))
     obsDd = box_id_by_name(simplified_wd, Symbol("obs_D=d"))
-    doZ   = box_id_by_name(simplified_wd, :doZ)
+    doZ   = box_id_by_name(simplified_wd, Symbol("do_Z=z"))
     doDd  = box_id_by_name(simplified_wd, Symbol("do_D=d"))
-    cUD   = box_id_by_name(simplified_wd, :cUD)
-    cUR   = box_id_by_name(simplified_wd, :cUR)
-    cUW   = box_id_by_name(simplified_wd, :cUW)
+    cUD   = box_id_by_name(simplified_wd, Symbol("c_D"))
+    cUR   = box_id_by_name(simplified_wd, Symbol("c_R"))
+    cUW   = box_id_by_name(simplified_wd, Symbol("c_W"))
     obsZz = box_id_by_name(simplified_wd, Symbol("obs_Z=z"))
-    cUZ   = box_id_by_name(simplified_wd, :cUZ)
+    cUZ   = box_id_by_name(simplified_wd, Symbol("c_Z"))
     doX   = box_id_by_name(simplified_wd, Symbol("do_X=doX_"))
 
     # 4) port signatures must match your expected printed WD

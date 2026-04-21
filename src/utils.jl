@@ -142,6 +142,54 @@ is_state_box(wd::WiringDiagram, b::Int) =
         n isa Symbol && startswith(String(n), "PU")
     end
 
+canonical_c_name(var::Symbol) = Symbol("c_", var)
+canonical_do_name(var::Symbol) = Symbol("do_", var)
+
+function state_input_ports(wd::WiringDiagram, b::Int)
+    ports = Int[]
+    for j in 1:nin(wd, b)
+        ws = in_wires(wd, b, j)
+        any(w -> is_state_box(wd, w.source.box), ws) && push!(ports, j)
+    end
+    return ports
+end
+
+function lambda_is_directly_fed(wd::WiringDiagram, b::Int)
+    ports = state_input_ports(wd, b)
+    isempty(ports) && return false
+
+    for j in ports
+        ws = in_wires(wd, b, j)
+        length(ws) == 1 || return false
+
+        w = only(ws)
+        is_state_box(wd, w.source.box) || return false
+
+        src_ws = out_wires(wd, w.source.box, w.source.port)
+        length(src_ws) == 1 || return false
+
+        src_w = only(src_ws)
+        same_edge =
+            src_w.source.box == w.source.box &&
+            src_w.source.port == w.source.port &&
+            src_w.target.box == w.target.box &&
+            src_w.target.port == w.target.port
+        same_edge || return false
+    end
+
+    return true
+end
+
+function unabsorbed_lambda_boxes(wd::WiringDiagram)
+    boxes = Int[]
+    for b in WD.box_ids(wd)
+        n = safe_box_name(wd, b)
+        n isa Symbol && startswith(String(n), "f_") || continue
+        !isempty(state_input_ports(wd, b)) && push!(boxes, b)
+    end
+    return boxes
+end
+
 function topological_order(wd::WiringDiagram)
     boxes = WD.box_ids(wd)
     
@@ -171,19 +219,16 @@ function topological_order(wd::WiringDiagram)
     return order
 end
 
-function find_same_name_boxes(wd::WiringDiagram)
-    # calculate topological order
+function duplicate_mechanism_groups(wd::WiringDiagram)
     boxes_all = WD.box_ids(wd)
 
-    # calculate indegree
     indeg = Dict(b => 0 for b in boxes_all)
     for b in boxes_all
         indeg[b] = count(w -> w.source.box != WD.input_id(wd), WD.in_wires(wd, b))
     end
 
-    # Kahn topological sorting
     order = Int[]
-    queue = [b for b in boxes_all if indeg[b] == 0]
+    queue = sort([b for b in boxes_all if indeg[b] == 0])
     while !isempty(queue)
         v = popfirst!(queue)
         push!(order, v)
@@ -191,7 +236,10 @@ function find_same_name_boxes(wd::WiringDiagram)
             tgt = w.target.box
             tgt == WD.output_id(wd) && continue
             indeg[tgt] -= 1
-            indeg[tgt] == 0 && push!(queue, tgt)
+            if indeg[tgt] == 0
+                push!(queue, tgt)
+                sort!(queue)
+            end
         end
     end
 
@@ -200,34 +248,23 @@ function find_same_name_boxes(wd::WiringDiagram)
         topo_pos[b] = i
     end
 
-
     groups = Dict{Symbol,Vector{Int}}()
-
-    for b in 1:WD.nboxes(wd)
+    for b in boxes_all
         n = safe_box_name(wd, b)
-        n isa Symbol && startswith(String(n), "f") || continue
+        n isa Symbol && startswith(String(n), "f_") || continue
         push!(get!(groups, n, Int[]), b)
     end
 
-    filter!(kv -> length(kv[2]) > 1, groups)
+    filtered = [(name, sort(boxes)) for (name, boxes) in groups if length(boxes) > 1]
+    sort!(filtered; by = pair -> minimum(get(topo_pos, b, typemax(Int)) for b in pair[2]))
+    return filtered
+end
 
-
-    # remain only the "earliest" group based on topological order
-    isempty(groups) && return groups
-
-    # for each name, get the minimum topo position among its boxes
-    name_minpos = Dict{Symbol,Int}()
-    for (name, boxes) in groups
-        name_minpos[name] = minimum(topo_pos[b] for b in boxes)
+function find_same_name_boxes(wd::WiringDiagram)
+    groups = Dict{Symbol,Vector{Int}}()
+    for (name, boxes) in duplicate_mechanism_groups(wd)
+        groups[name] = boxes
     end
-
-    global_min = minimum(values(name_minpos))
-
-    # remove all names that are not the global_min, keep only the "earliest" group
-    for (name, pos) in name_minpos
-        pos == global_min || delete!(groups, name)
-    end
-
     return groups
 end
 
@@ -246,11 +283,40 @@ function input_sources_set(wd::WiringDiagram, b::Int)
     return S
 end
 
+function merge_source_signature(wd::WiringDiagram, src_box::Int, src_port::Int)
+    if is_sharp_state(wd, src_box)
+        return (:sharp_state, safe_box_name(wd, src_box))
+    else
+        return (:wire, src_box, src_port)
+    end
+end
+
+function input_source_signature(wd::WiringDiagram, b::Int)
+    sig = Tuple{Int,Vector{Any}}[]
+    nin = length(input_ports(wd, b))
+    for j in 1:nin
+        sources = Any[]
+        for w in in_wires(wd, b, j)
+            push!(sources, merge_source_signature(wd, w.source.box, w.source.port))
+        end
+        sort!(sources)
+        push!(sig, (j, sources))
+    end
+    return sig
+end
+
+function merge_signature(wd::WiringDiagram, b::Int)
+    # Paper step 3(alpha) only merges mechanisms that truly share their inputs.
+    # In this representation that means matching the exact source endpoint(s)
+    # feeding each input port, not just matching variable types.
+    return input_source_signature(wd, b)
+end
+
 # Parsing Box Type and Variable Name
 function get_node_info(box_val::Any)
     val_str = string(box_val)
     if startswith(val_str, "f_")
-        return :Mechanism, Symbol(uppercase(replace(val_str, "f_" => "")))
+        return :Mechanism, Symbol(replace(val_str, "f_" => ""))
     elseif startswith(val_str, "PU")
         return :Exogenous, Symbol(val_str)
     else
@@ -260,27 +326,32 @@ end
 
 is_c_mechanism(wd::WiringDiagram, b::Int) = begin
     n = safe_box_name(wd, b)
-    n isa Symbol && startswith(String(n), "c")
+    n isa Symbol && (startswith(String(n), "c_") || startswith(String(n), "cU"))
 end
 
 is_root_mechanism(wd::WiringDiagram, b::Int) = begin
     n = safe_box_name(wd, b)
-    n isa Symbol && (startswith(String(n) , "cUR") || startswith(String(n) , "cR"))
+    n isa Symbol && (
+        startswith(String(n), "c_R") ||
+        startswith(String(n), "cUR") ||
+        startswith(String(n), "cR")
+    )
 end
 
 is_cX_box(wd, b::Int, var_type::Symbol) = begin
     n = safe_box_name(wd, b)
-    a = Symbol("cU", var_type)
-    n isa Symbol && n == a
+    old_name = Symbol("cU", var_type)
+    new_name = canonical_c_name(var_type)
+    n isa Symbol && (n == new_name || n == old_name)
 end
 
 function is_sharp_state(wd, b::Int)
-    # same idea for doX / doZ / doD
+    # Support both canonical do_X labels and older doX labels.
     b <= 0 && return false
 
     n = box_name(wd, b)
     n isa Symbol || return false
-    startswith(String(n), "do") || return false
+    (startswith(String(n), "do_") || startswith(String(n), "do")) || return false
     nin(wd, b) == 0 || return false
     nout(wd, b) == 1 || return false
     return true
