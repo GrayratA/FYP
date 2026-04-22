@@ -9,10 +9,12 @@ using Catlab.Programs
 using Catlab.Graphics
 using Catlab.Graphics: Graphviz, to_graphviz
 
-include(joinpath(@__DIR__, "..", "src", "utils.jl"))
-include(joinpath(@__DIR__, "..", "src", "admg_compile.jl"))
-include(joinpath(@__DIR__, "..", "src", "simplify_cf.jl"))
-include(joinpath(@__DIR__, "..", "src", "id_cf.jl"))
+const PROJECT_ROOT = normpath(joinpath(@__DIR__, "..", "..", "..", ".."))
+
+include(joinpath(PROJECT_ROOT, "src", "utils.jl"))
+include(joinpath(PROJECT_ROOT, "src", "admg_compile.jl"))
+include(joinpath(PROJECT_ROOT, "src", "simplify_cf.jl"))
+include(joinpath(PROJECT_ROOT, "src", "id_cf.jl"))
 
 const STAGE_KEYS = (:setup_ms, :identify_ms, :total_ms, :build_ms, :simplify_ms, :step4_ms, :step5_ms)
 
