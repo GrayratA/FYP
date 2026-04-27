@@ -35,6 +35,72 @@ Run full Julia tests:
 julia --project=. test/runtest.jl
 ```
 
+## Counterfactual API (`identify_counterfactual`)
+
+Use `identify_counterfactual` as the single entry point for:
+- building the SCM/multiverse from a graph + queries,
+- running simplify + Step4/Step5,
+- returning identifiability status and formula text.
+
+Load core files:
+
+```julia
+using Catlab
+include("src/admg_compile.jl")
+include("src/simplify_cf.jl")
+include("src/id_cf.jl")
+include("src/bn_import.jl")     # optional: only if you read .bif/.net
+include("src/chyp_export.jl")   # optional: only if you set trace_dir
+```
+
+HEPAR2 three-world conditional example:
+
+```julia
+hepar2 = read_bn_structure("net/hepar2.net")
+model = hepar2.model
+
+queries = [
+    CounterfactualQuery(:Real, Dict{Symbol, Symbol}(), Dict(:age => :age_obs, :sex => :sex_obs), Symbol[]),
+    CounterfactualQuery(:CF_pbc, Dict(:age => :age_do), Dict(:pbc => :pbc_obs), Symbol[]),
+    CounterfactualQuery(:CF_carc, Dict(:age => :age_do), Dict(:carcinoma => :carc_obs), Symbol[]),
+]
+
+res = identify_counterfactual(
+    model,
+    queries;
+    display_syms=[:age, :sex, :pbc, :carcinoma],
+    output_vars=["carcinoma"],
+    data=Step5DataConfig(mode=:conditional_queries),
+    display=Step5DisplayConfig(
+        symbols=Dict("age" => "age", "sex" => "sex", "pbc" => "pbc", "carcinoma" => "carcinoma"),
+        value_rename=Dict("age_do" => "age"),
+    ),
+    trace_dir="trace/HEPAR2", # optional
+)
+
+println("identifiable = ", res.identifiable)
+println("formula      = ", res.data_tex)
+println("failure_stage= ", res.failure_stage)
+println("error        = ", res.error)
+```
+
+Key returned fields:
+- `res.identifiable`: `true` if Step4 succeeds.
+- `res.formula_available`: `true` if Step5 produced formula text.
+- `res.raw_tex`, `res.simplified_tex`, `res.data_tex`: formula strings.
+- `res.failure_stage`: `nothing` or one of `:build`, `:simplify`, `:step4`, `:step5`.
+- `res.error`: error message string when failed.
+- `res.step3_blockers`: unabsorbed lambda boxes before Step4.
+- `res.trace_paths`: written `.chyp` paths when `trace_dir` is set.
+- `res.timings_ms`: timing breakdown by stage.
+
+Alias:
+- `run_cf_pipeline(...)` is an alias of `identify_counterfactual(...)`.
+
+Troubleshooting:
+- If `res.identifiable == false`, check `res.failure_stage` and `res.error`.
+- If you pass `trace_dir`, ensure `include("src/chyp_export.jl")` was loaded.
+
 ## Runtime Benchmarks
 
 Run main runtime comparison:

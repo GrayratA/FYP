@@ -1,0 +1,31 @@
+gen age_obs : 1 -> 0 "7FDBFF"
+gen c_ChHepatitis : 3 -> 1
+gen c_Cirrhosis : 2 -> 1
+gen c_PBC : 2 -> 1
+gen c_Steatosis : 2 -> 1
+gen c_age : 0 -> 1
+gen c_alcoholism : 0 -> 1
+gen c_carcinoma : 2 -> 1
+gen c_choledocholithotomy : 1 -> 1
+gen c_diabetes : 0 -> 1
+gen c_fibrosis : 1 -> 1
+gen c_gallstones : 0 -> 1
+gen c_hospital : 0 -> 1
+gen c_injections : 3 -> 1
+gen c_obesity : 1 -> 1
+gen c_sex : 0 -> 1
+gen c_surgery : 0 -> 1
+gen c_transfusion : 3 -> 1
+gen c_vh_amn : 0 -> 1
+gen carc_obs : 1 -> 0 "7FDBFF"
+gen choledocholithotomy : 1 -> 2
+gen copy : 1 -> 2
+gen del : 1 -> 0
+gen do_age_do : 0 -> 1 "FFD166"
+gen do_sex_obs : 0 -> 1 "FFD166"
+gen hospital : 1 -> 2
+gen merge : 2 -> 1
+gen sex_obs : 1 -> 0 "7FDBFF"
+gen surgery : 1 -> 2
+
+let s4 = c_vh_amn ; do_age_do * id ; c_gallstones * id * id ; c_surgery * id * id * id ; c_alcoholism * id * id * id * id ; c_age * id * id * id * id * id ; do_sex_obs * id * id * id * id * id * id ; c_hospital * id * id * id * id * id * id * id ; c_sex * id * id * id * id * id * id * id * id ; c_diabetes * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * c_choledocholithotomy * id * id ; id * id * id * id * id * id * surgery * id * id * id ; id * id * id * id * age_obs * id * id * id * id * id * id ; sw[0, 1, 2, 3, 8, 4, 5, 6, 7, 9] ; id * id * id * c_PBC * id * id * id * id * id ; id * id * hospital * id * id * id * id * id * id ; id * sex_obs * id * id * id * id * id * id * id * id ; c_obesity * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * choledocholithotomy * id ; sw[0, 4, 1, 2, 3, 5, 6, 7, 8, 9] ; sw[1, 0, 2, 3, 4, 5, 6, 7, 8, 9] ; c_Steatosis * id * id * id * id * id * id * id * id ; sw[0, 1, 4, 6, 2, 3, 5, 7, 8] ; id * c_injections * id * id * id * id * id ; sw[0, 1, 2, 4, 5, 3, 6] ; id * id * c_transfusion * id * id ; sw[0, 1, 2, 4, 3] ; id * c_ChHepatitis * id ; id * c_fibrosis * id ; sw[1, 0, 2] ; c_Cirrhosis * id ; sw[1, 0] ; c_carcinoma ; carc_obs

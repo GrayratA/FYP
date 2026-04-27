@@ -1,0 +1,49 @@
+gen PU_ChHepatitis : 0 -> 1
+gen PU_Cirrhosis : 0 -> 1
+gen PU_PBC : 0 -> 1
+gen PU_Steatosis : 0 -> 1
+gen PU_age : 0 -> 1
+gen PU_alcoholism : 0 -> 1
+gen PU_carcinoma : 0 -> 1
+gen PU_choledocholithotomy : 0 -> 1
+gen PU_diabetes : 0 -> 1
+gen PU_fibrosis : 0 -> 1
+gen PU_gallstones : 0 -> 1
+gen PU_hospital : 0 -> 1
+gen PU_injections : 0 -> 1
+gen PU_obesity : 0 -> 1
+gen PU_sex : 0 -> 1
+gen PU_surgery : 0 -> 1
+gen PU_transfusion : 0 -> 1
+gen PU_vh_amn : 0 -> 1
+gen age_obs : 1 -> 0 "7FDBFF"
+gen carc_obs : 1 -> 0 "7FDBFF"
+gen choledocholithotomy : 1 -> 2
+gen copy : 1 -> 2
+gen del : 1 -> 0
+gen do_age_do : 0 -> 1 "FFD166"
+gen do_sex_obs : 0 -> 1 "FFD166"
+gen f_ChHepatitis : 4 -> 1
+gen f_Cirrhosis : 3 -> 1
+gen f_PBC : 3 -> 1
+gen f_Steatosis : 3 -> 1
+gen f_age : 1 -> 1
+gen f_alcoholism : 1 -> 1
+gen f_carcinoma : 3 -> 1
+gen f_choledocholithotomy : 2 -> 1
+gen f_diabetes : 1 -> 1
+gen f_fibrosis : 2 -> 1
+gen f_gallstones : 1 -> 1
+gen f_hospital : 1 -> 1
+gen f_injections : 4 -> 1
+gen f_obesity : 2 -> 1
+gen f_sex : 1 -> 1
+gen f_surgery : 1 -> 1
+gen f_transfusion : 4 -> 1
+gen f_vh_amn : 1 -> 1
+gen hospital : 1 -> 2
+gen merge : 2 -> 1
+gen sex_obs : 1 -> 0 "7FDBFF"
+gen surgery : 1 -> 2
+
+let s3 = PU_ChHepatitis ; PU_Cirrhosis * id ; PU_vh_amn * id * id ; PU_PBC * id * id * id ; PU_Steatosis * id * id * id * id ; PU_age * id * id * id * id * id ; PU_surgery * id * id * id * id * id * id ; PU_alcoholism * id * id * id * id * id * id * id ; PU_sex * id * id * id * id * id * id * id * id ; PU_hospital * id * id * id * id * id * id * id * id * id ; PU_injections * id * id * id * id * id * id * id * id * id * id ; PU_carcinoma * id * id * id * id * id * id * id * id * id * id * id ; PU_choledocholithotomy * id * id * id * id * id * id * id * id * id * id * id * id ; PU_transfusion * id * id * id * id * id * id * id * id * id * id * id * id * id ; do_age_do * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; PU_diabetes * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; PU_fibrosis * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; PU_obesity * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; PU_gallstones * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; do_sex_obs * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * f_vh_amn * id * id ; id * id * id * id * id * id * id * id * id * id * id * id * id * id * f_age * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * id * id * id * f_surgery * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * id * id * f_alcoholism * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * id * f_sex * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * f_hospital * id * id * id * id * id * id * id * id * id ; id * id * id * id * f_diabetes * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; id * f_gallstones * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; sw[0, 5, 16, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19] ; sw[1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19] ; f_PBC * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * id * id * id * age_obs * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * id * id * surgery * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * sex_obs * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * hospital * id * id * id * id * id * id * id ; sw[0, 1, 2, 4, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] ; id * id * f_obesity * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; sw[0, 1, 5, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] ; id * f_choledocholithotomy * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; sw[0, 1, 2, 9, 12, 3, 4, 5, 6, 7, 8, 10, 11, 13, 14, 15] ; sw[0, 1, 4, 3, 2, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] ; id * id * f_Steatosis * id * id * id * id * id * id * id * id * id * id * id ; id * choledocholithotomy * id * id * id * id * id * id * id * id * id * id * id * id ; sw[0, 1, 7, 8, 10, 2, 3, 4, 5, 6, 9, 11, 12, 13, 14] ; sw[0, 3, 4, 1, 2, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14] ; id * f_injections * id * id * id * id * id * id * id * id * id * id ; sw[0, 1, 2, 5, 7, 8, 3, 4, 6, 9, 10, 11] ; sw[0, 1, 5, 2, 3, 4, 6, 7, 8, 9, 10, 11] ; id * id * f_transfusion * id * id * id * id * id * id ; sw[0, 1, 2, 6, 8, 3, 4, 5, 7] ; sw[0, 2, 3, 1, 4, 5, 6, 7, 8] ; id * f_ChHepatitis * id * id * id * id ; sw[0, 1, 3, 2, 4, 5] ; id * f_fibrosis * id * id * id ; sw[0, 1, 2, 4, 3] ; sw[0, 2, 3, 1, 4] ; id * f_Cirrhosis * id ; sw[1, 2, 0] ; f_carcinoma ; carc_obs

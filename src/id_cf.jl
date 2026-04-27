@@ -1701,3 +1701,264 @@ function id_cf_step5(
         data_tex = data_tex
     )
 end
+
+
+function _infer_display_syms(
+    queries::Vector{CounterfactualQuery},
+    output_vars,
+)
+    display = Set{Symbol}()
+    for q in queries
+        for (v, _) in q.observations
+            push!(display, v)
+        end
+        for (v, _) in q.interventions
+            push!(display, v)
+        end
+        for v in q.outputs
+            push!(display, v)
+        end
+    end
+    for v in output_vars
+        push!(display, Symbol(v))
+    end
+    return display
+end
+
+function _trace_filename(prefix::String, idx::Int, stage::String)
+    base = lpad(string(idx), 2, '0') * "_" * stage * ".chyp"
+    return isempty(prefix) ? base : prefix * "_" * base
+end
+
+function _maybe_write_trace!(
+    trace_paths::Dict{String,String},
+    trace_dir::Union{Nothing,AbstractString},
+    file::String,
+    wd::WiringDiagram;
+    name::String,
+)
+    trace_dir === nothing && return nothing
+    if !@isdefined(write_chyp)
+        error("trace_dir was provided but write_chyp is not defined. include(\"chyp_export.jl\") first.")
+    end
+    path = joinpath(trace_dir, file)
+    write_chyp(path, wd; name=name)
+    trace_paths[file] = path
+    return path
+end
+
+"""
+Run the full counterfactual-identification pipeline.
+
+Input:
+- `model_or_base`: either a model accepted by `graph_b_to_scm` (for example
+  `ConfoundedModel` / `ADMGModel`) or a prebuilt base `WiringDiagram`.
+- `queries`: `Vector{CounterfactualQuery}`.
+
+Output (NamedTuple):
+- `identifiable`: whether Step 4 succeeded.
+- `formula_available`: whether Step 5 produced a formula.
+- `raw_tex` / `simplified_tex` / `data_tex`: rendered expressions (or `nothing`).
+- `failure_stage`: `nothing`, `:build`, `:simplify`, `:step4`, or `:step5`.
+- `error`: error string when failed.
+- `step3_blockers`: unabsorbed lambda-box names before Step 4.
+- `base_scm`, `wd`: intermediate diagrams.
+- `trace_paths`: generated `.chyp` files when `trace_dir` is set.
+- `timings_ms`: stage timings in milliseconds.
+"""
+function identify_counterfactual(
+    model_or_base,
+    queries::Vector{CounterfactualQuery};
+    display_syms::Vector{Symbol}=Symbol[],
+    output_vars=String[],
+    run_simplify::Bool=true,
+    simplify::Bool=true,
+    step4_verbose::Bool=false,
+    display::Step5DisplayConfig=Step5DisplayConfig(),
+    latent::Step5LatentConfig=Step5LatentConfig(),
+    rules::Step5RuleConfig=Step5RuleConfig(),
+    data::Step5DataConfig=Step5DataConfig(),
+    fixed::Step5FixedConfig=Step5FixedConfig(),
+    trace_dir::Union{Nothing,AbstractString}=nothing,
+    trace_prefix::String="",
+)
+    total_t0 = time_ns()
+
+    base_scm = nothing
+    wd = nothing
+    step3_blockers = String[]
+    step5_result = nothing
+    raw_tex = nothing
+    simplified_tex = nothing
+    data_tex = nothing
+
+    identifiable = false
+    formula_available = false
+    failure_stage = nothing
+    error_msg = nothing
+
+    build_ms = 0.0
+    simplify_ms = 0.0
+    step4_ms = 0.0
+    step5_ms = 0.0
+
+    trace_paths = Dict{String,String}()
+
+    output_vars_str = String.(output_vars)
+    inferred_display = _infer_display_syms(queries, output_vars_str)
+    display_var = union(Set(display_syms), inferred_display)
+
+    finalize = () -> begin
+        total_ms = (time_ns() - total_t0) / 1e6
+        return (
+            identifiable = identifiable,
+            formula_available = formula_available,
+            raw_tex = raw_tex,
+            simplified_tex = simplified_tex,
+            data_tex = data_tex,
+            result = step5_result,
+            failure_stage = failure_stage,
+            error = error_msg,
+            display_vars = sort!(collect(display_var)),
+            step3_blockers = step3_blockers,
+            base_scm = base_scm,
+            wd = wd,
+            trace_paths = trace_paths,
+            timings_ms = (
+                build = build_ms,
+                simplify = simplify_ms,
+                step4 = step4_ms,
+                step5 = step5_ms,
+                total = total_ms,
+            ),
+        )
+    end
+
+    build_t0 = time_ns()
+    try
+        if model_or_base isa WiringDiagram
+            base_scm = deepcopy(model_or_base)
+        else
+            if isempty(display_var)
+                base_scm = graph_b_to_scm(model_or_base)
+            else
+                base_scm = graph_b_to_scm(model_or_base; outputs=display_var)
+            end
+        end
+        _maybe_write_trace!(
+            trace_paths,
+            trace_dir,
+            _trace_filename(trace_prefix, 1, "base_scm"),
+            base_scm;
+            name="base_scm",
+        )
+
+        wd = build_multiverse(base_scm, queries)
+        _maybe_write_trace!(
+            trace_paths,
+            trace_dir,
+            _trace_filename(trace_prefix, 2, "multiverse"),
+            wd;
+            name="multiverse",
+        )
+        build_ms = (time_ns() - build_t0) / 1e6
+    catch err
+        build_ms = (time_ns() - build_t0) / 1e6
+        failure_stage = :build
+        error_msg = sprint(showerror, err)
+        return finalize()
+    end
+
+    simplify_t0 = time_ns()
+    try
+        if run_simplify
+            drop_discard_branches!(wd)
+            _maybe_write_trace!(
+                trace_paths,
+                trace_dir,
+                _trace_filename(trace_prefix, 3, "simplify1"),
+                wd;
+                name="s1",
+            )
+            separate_sharp_effect_copy_maps!(wd)
+            _maybe_write_trace!(
+                trace_paths,
+                trace_dir,
+                _trace_filename(trace_prefix, 4, "simplify2"),
+                wd;
+                name="s2",
+            )
+            merge_identical_deterministic_boxes(wd)
+            _maybe_write_trace!(
+                trace_paths,
+                trace_dir,
+                _trace_filename(trace_prefix, 5, "simplify3"),
+                wd;
+                name="s3",
+            )
+            replace_fx_with_cx!(wd)
+            _maybe_write_trace!(
+                trace_paths,
+                trace_dir,
+                _trace_filename(trace_prefix, 6, "simplify4"),
+                wd;
+                name="s4",
+            )
+        end
+        simplify_ms = (time_ns() - simplify_t0) / 1e6
+    catch err
+        simplify_ms = (time_ns() - simplify_t0) / 1e6
+        failure_stage = :simplify
+        error_msg = sprint(showerror, err)
+        return finalize()
+    end
+
+    step3_blockers = sort!(unique(String(box(wd, b).value) for b in unabsorbed_lambda_boxes(wd)))
+
+    step4_t0 = time_ns()
+    try
+        id_cf_step4!(wd, display_var; verbose=step4_verbose)
+        identifiable = true
+        _maybe_write_trace!(
+            trace_paths,
+            trace_dir,
+            _trace_filename(trace_prefix, 7, "step4"),
+            wd;
+            name="step4",
+        )
+        step4_ms = (time_ns() - step4_t0) / 1e6
+    catch err
+        step4_ms = (time_ns() - step4_t0) / 1e6
+        failure_stage = :step4
+        error_msg = sprint(showerror, err)
+        return finalize()
+    end
+
+    step5_t0 = time_ns()
+    try
+        step5_result = id_cf_step5(
+            wd;
+            output_vars=output_vars_str,
+            simplify=simplify,
+            queries=queries,
+            display=display,
+            latent=latent,
+            rules=rules,
+            data=data,
+            fixed=fixed,
+        )
+        raw_tex = step5_result.raw_tex
+        simplified_tex = step5_result.simplified_tex
+        data_tex = step5_result.data_tex
+        formula_available = true
+        step5_ms = (time_ns() - step5_t0) / 1e6
+    catch err
+        step5_ms = (time_ns() - step5_t0) / 1e6
+        failure_stage = :step5
+        error_msg = sprint(showerror, err)
+    end
+
+    return finalize()
+end
+
+# run_cf_pipeline(args...; kwargs...) = identify_counterfactual(args...; kwargs...)

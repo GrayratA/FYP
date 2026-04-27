@@ -1,0 +1,31 @@
+gen P_10_choledocholithotomy___do_gallstones__ : 1 -> 1
+gen P_11_age_____ : 0 -> 1
+gen P_12_carcinoma___do_Cirrhosis_PBC__ : 2 -> 1
+gen P_13_injections___do_choledocholithotomy_hospital_surgery__ : 3 -> 1
+gen P_14_Steatosis___do_alcoholism_obesity__ : 2 -> 1
+gen P_15_hospital_____ : 0 -> 1
+gen P_16_sex_____ : 0 -> 1
+gen P_17_transfusion___do_choledocholithotomy_hospital_surgery__ : 3 -> 1
+gen P_18_diabetes_____ : 0 -> 1
+gen P_1_vh_amn_____ : 0 -> 1
+gen P_2_obesity___do_diabetes__ : 1 -> 1
+gen P_3_ChHepatitis___do_injections_transfusion_vh_amn__ : 3 -> 1
+gen P_4_Cirrhosis___do_Steatosis_fibrosis__ : 2 -> 1
+gen P_5_gallstones_____ : 0 -> 1
+gen P_6_fibrosis___do_ChHepatitis__ : 1 -> 1
+gen P_7_surgery_____ : 0 -> 1
+gen P_8_PBC___do_age_sex__ : 2 -> 1
+gen P_9_alcoholism_____ : 0 -> 1
+gen age_obs : 1 -> 0 "7FDBFF"
+gen carc_obs : 1 -> 0 "7FDBFF"
+gen choledocholithotomy : 1 -> 2
+gen copy : 1 -> 2
+gen del : 1 -> 0
+gen do_age_do : 0 -> 1 "FFD166"
+gen do_sex_obs : 0 -> 1 "FFD166"
+gen hospital : 1 -> 2
+gen merge : 2 -> 1
+gen sex_obs : 1 -> 0 "7FDBFF"
+gen surgery : 1 -> 2
+
+let step4 = P_1_vh_amn_____ ; do_age_do * id ; P_5_gallstones_____ * id * id ; P_7_surgery_____ * id * id * id ; P_9_alcoholism_____ * id * id * id * id ; P_11_age_____ * id * id * id * id * id ; do_sex_obs * id * id * id * id * id * id ; P_15_hospital_____ * id * id * id * id * id * id * id ; P_16_sex_____ * id * id * id * id * id * id * id * id ; P_18_diabetes_____ * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * P_10_choledocholithotomy___do_gallstones__ * id * id ; id * id * id * id * id * id * surgery * id * id * id ; id * id * id * id * age_obs * id * id * id * id * id * id ; sw[0, 1, 2, 3, 8, 4, 5, 6, 7, 9] ; sw[0, 1, 2, 4, 3, 5, 6, 7, 8, 9] ; id * id * id * P_8_PBC___do_age_sex__ * id * id * id * id * id ; id * id * hospital * id * id * id * id * id * id ; id * sex_obs * id * id * id * id * id * id * id * id ; P_2_obesity___do_diabetes__ * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * choledocholithotomy * id ; sw[0, 4, 1, 2, 3, 5, 6, 7, 8, 9] ; sw[1, 0, 2, 3, 4, 5, 6, 7, 8, 9] ; P_14_Steatosis___do_alcoholism_obesity__ * id * id * id * id * id * id * id * id ; sw[0, 1, 4, 6, 2, 3, 5, 7, 8] ; sw[0, 3, 1, 2, 4, 5, 6, 7, 8] ; id * P_13_injections___do_choledocholithotomy_hospital_surgery__ * id * id * id * id * id ; sw[0, 1, 2, 4, 5, 3, 6] ; sw[0, 1, 4, 2, 3, 5, 6] ; id * id * P_17_transfusion___do_choledocholithotomy_hospital_surgery__ * id * id ; sw[0, 1, 2, 4, 3] ; id * P_3_ChHepatitis___do_injections_transfusion_vh_amn__ * id ; id * P_6_fibrosis___do_ChHepatitis__ * id ; P_4_Cirrhosis___do_Steatosis_fibrosis__ * id ; P_12_carcinoma___do_Cirrhosis_PBC__ ; carc_obs
