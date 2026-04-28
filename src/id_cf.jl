@@ -1961,4 +1961,4 @@ function identify_counterfactual(
     return finalize()
 end
 
-# run_cf_pipeline(args...; kwargs...) = identify_counterfactual(args...; kwargs...)
+run_cf_pipeline(args...; kwargs...) = identify_counterfactual(args...; kwargs...)
