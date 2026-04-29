@@ -1,0 +1,18 @@
+gen R1 : 1 -> 2
+gen c_L : 2 -> 1
+gen c_M : 1 -> 1
+gen c_R1 : 0 -> 1
+gen c_T : 2 -> 1
+gen c_W : 0 -> 1
+gen c_Y : 2 -> 1
+gen copy : 1 -> 2
+gen del : 1 -> 0
+gen do_m : 0 -> 1 "FFD166"
+gen do_t : 0 -> 1 "FFD166"
+gen do_w : 0 -> 1 "FFD166"
+gen m : 1 -> 0 "7FDBFF"
+gen merge : 2 -> 1
+gen t_ : 1 -> 0 "7FDBFF"
+gen w : 1 -> 0 "7FDBFF"
+
+let s4 = do_w * id ; c_R1 * id * id ; do_w * id * id * id ; do_m * id * id * id * id ; do_t * id * id * id * id * id ; c_W * id * id * id * id * id * id ; id * id * id * id * R1 * id * id ; id * id * id * c_M * id * id * id * id ; id * c_L * id * id * id * id * id ; w * id * id * id * id * id * id ; sw[0, 1, 2, 4, 3, 5] ; id * id * id * c_T * id ; id * m * id * id * id ; sw[1, 0, 2, 3] ; c_Y * id * id ; id * t_ * id

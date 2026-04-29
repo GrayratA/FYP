@@ -660,13 +660,13 @@ end
 
 const WD = Catlab.WiringDiagrams
 
-# ---------- factor representation ----------
+# factor representation
 struct ProbFactor
     left::Vector{String}    # vars on left of P(...)
     dovars::Vector{String}  # vars inside do(...)
 end
 
-# ---------- small expr AST ----------
+# small expr AST
 abstract type CFExpr end
 
 struct CFAtom <: CFExpr
@@ -691,7 +691,7 @@ struct CFFrac <: CFExpr
     den::CFExpr
 end
 
-# ---------- LaTeX printing ----------
+# LaTeX printing
 function cf_latex(e::CFExpr)
     if e isa CFAtom
         return (e::CFAtom).s
@@ -710,7 +710,7 @@ function cf_latex(e::CFExpr)
     end
 end
 
-# ---------- parse naming conventions ----------
+# parse naming conventions
 function parse_prob_box_name(sym::Symbol)
     s = String(sym)
     startswith(s, "P") || return nothing
@@ -804,7 +804,6 @@ function collect_all_vars(factors::Vector{ProbFactor})
     return vars
 end
 
-# ---------- generic simplification on sums ----------
 """
 Simplify Σ_{sumvars} ∏ atoms:
 
@@ -877,7 +876,7 @@ function simplify_sum(prod::CFProd, sumvars::Vector{String})
     return CFProd(CFExpr[a for a in atoms]), sumvars
 end
 
-# ---------- drop-do rule helpers ----------
+# drop-do rule helpers
 function build_adj(directed_edges::Vector{Tuple{String,String}})
     adj = Dict{String,Vector{String}}()
     for (u,v) in directed_edges
@@ -964,7 +963,7 @@ function rule_eliminate_sum_normalized!(prod::CFProd, sumvars::Vector{String})
     return CFProd(CFExpr[a for a in atoms]), sumvars
 end
 
-# ---------- optional: data availability rewrite (generic Step 4.5) ----------
+
 _to_prod(e::CFExpr) = e isa CFProd ? (e::CFProd) : CFProd(CFExpr[e])
 
 function find_atom(e::CFExpr, pred)::Union{Nothing,CFAtom}

@@ -1,0 +1,25 @@
+gen PU_L : 0 -> 1
+gen PU_M : 0 -> 1
+gen PU_R1 : 0 -> 1
+gen PU_T : 0 -> 1
+gen PU_W : 0 -> 1
+gen PU_Y : 0 -> 1
+gen UM : 1 -> 2
+gen UR1 : 1 -> 2
+gen UW : 1 -> 2
+gen copy : 1 -> 2
+gen del : 1 -> 0
+gen do_t : 0 -> 1 "FFD166"
+gen do_w : 0 -> 1 "FFD166"
+gen f_L : 3 -> 1
+gen f_M : 2 -> 1
+gen f_R1 : 1 -> 1
+gen f_T : 3 -> 1
+gen f_W : 1 -> 1
+gen f_Y : 3 -> 1
+gen m : 1 -> 0 "7FDBFF"
+gen merge : 2 -> 1
+gen t_ : 1 -> 0 "7FDBFF"
+gen w : 1 -> 0 "7FDBFF"
+
+let s2 = PU_L * id ; PU_M * id * id ; PU_R1 * id * id * id ; PU_T * id * id * id * id ; PU_W * id * id * id * id * id ; PU_Y * id * id * id * id * id * id ; do_w * id * id * id * id * id * id * id ; do_t * id * id * id * id * id * id * id * id ; do_w * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * UM * id * id ; id * id * id * id * id * id * UR1 * id * id * id * id ; id * id * id * id * UW * id * id * id * id * id * id * id ; sw[0, 1, 2, 10, 3, 4, 5, 6, 7, 8, 9, 11, 12] ; id * id * f_M * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * f_R1 * id * id * id * id ; id * id * id * id * id * id * id * id * f_R1 * id * id * id ; id * id * id * id * f_W * id * id * id * id * id * id * id ; id * id * id * id * id * f_W * id * id * id * id * id * id ; id * id * m * id * id * id * id * id * id * id * id * id ; sw[0, 5, 7, 1, 2, 3, 4, 6, 8, 9, 10] ; sw[1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10] ; f_T * id * id * id * id * id * id * id * id ; sw[0, 1, 2, 3, 6, 4, 5, 7, 8] ; id * id * id * f_M * id * id * id * id ; id * id * id * id * w * id * id * id ; t_ * id * id * id * id * id * id ; sw[0, 2, 4, 1, 3, 5] ; f_L * id * id * id ; sw[0, 2, 1, 3] ; f_Y * id

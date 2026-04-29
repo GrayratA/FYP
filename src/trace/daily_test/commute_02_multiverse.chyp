@@ -1,0 +1,36 @@
+gen M : 1 -> 2
+gen PU_L : 0 -> 1
+gen PU_M : 0 -> 1
+gen PU_R1 : 0 -> 1
+gen PU_T : 0 -> 1
+gen PU_W : 0 -> 1
+gen PU_Y : 0 -> 1
+gen R1 : 1 -> 2
+gen T : 1 -> 2
+gen UL : 1 -> 3
+gen UM : 1 -> 3
+gen UR1 : 1 -> 3
+gen UT : 1 -> 3
+gen UW : 1 -> 3
+gen UY : 1 -> 3
+gen W : 1 -> 2
+gen W : 1 -> 3
+gen Y : 1 -> 0
+gen copy : 1 -> 2
+gen del : 1 -> 0
+gen discardT : 1 -> 0
+gen discardW : 1 -> 0
+gen do_t : 0 -> 1 "FFD166"
+gen do_w : 0 -> 1 "FFD166"
+gen f_L : 3 -> 1
+gen f_M : 2 -> 1
+gen f_R1 : 1 -> 1
+gen f_T : 3 -> 1
+gen f_W : 1 -> 1
+gen f_Y : 3 -> 1
+gen m : 1 -> 0 "7FDBFF"
+gen merge : 2 -> 1
+gen t_ : 1 -> 0 "7FDBFF"
+gen w : 1 -> 0 "7FDBFF"
+
+let multiverse = PU_L * id ; PU_M * id * id ; PU_R1 * id * id * id ; PU_T * id * id * id * id ; PU_W * id * id * id * id * id ; PU_Y * id * id * id * id * id * id ; do_t * id * id * id * id * id * id * id ; do_w * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * UL * id ; id * id * id * id * id * id * UM * id * id * id * id ; id * id * id * id * id * UR1 * id * id * id * id * id * id * id ; id * id * id * id * UT * id * id * id * id * id * id * id * id * id * id ; id * id * id * UW * id * id * id * id * id * id * id * id * id * id * id * id * id ; id * id * UY * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; W * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * id * id * f_R1 * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * id * id * id * f_R1 * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * id * id * id * id * f_R1 * id * id * id * id * id * id * id ; id * id * id * id * id * id * f_W * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * f_W * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * f_W * id * id * id * id * id * id * id * id * id * id * id * id * id ; sw[0, 17, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 20, 21] ; f_M * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * id * id * R1 * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * id * id * id * id * R1 * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * R1 * id * id * id * id * id * id ; id * id * id * id * id * id * W * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * W * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * id * discardW * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; M * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; sw[0, 1, 2, 14, 19, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 20, 21, 22, 23, 24, 25, 26] ; sw[0, 1, 2, 4, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26] ; id * id * f_T * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; sw[0, 1, 2, 3, 4, 5, 6, 7, 19, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 22, 23, 24] ; id * id * id * id * id * id * id * f_M * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; sw[0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 14, 9, 10, 11, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23] ; sw[0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23] ; id * id * id * id * id * id * id * id * f_T * id * id * id * id * id * id * id * id * id * id * id * id * id ; sw[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 17, 10, 11, 12, 13, 14, 15, 16, 18, 19, 20, 21] ; id * id * id * id * id * id * id * id * id * f_M * id * id * id * id * id * id * id * id * id * id * id ; sw[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 11, 13, 15, 16, 17, 18, 19, 20] ; sw[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 11, 13, 14, 15, 16, 17, 18, 19, 20] ; id * id * id * id * id * id * id * id * id * id * f_T * id * id * id * id * id * id * id * id ; id * id * id * id * id * id * id * id * id * id * id * w * id * id * id * id * id * id * id ; id * m * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; sw[0, 1, 15, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16] ; sw[1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] ; f_L * id * id * id * id * id * id * id * id * id * id * id * id * id * id ; sw[0, 1, 5, 12, 2, 3, 4, 6, 7, 8, 9, 10, 11, 13, 14] ; id * f_L * id * id * id * id * id * id * id * id * id * id * id ; id * id * id * id * id * discardT * id * id * id * id * id * id * id ; id * id * id * id * id * id * T * id * id * id * id * id ; sw[0, 4, 10, 1, 2, 3, 5, 6, 7, 8, 9, 11, 12] ; sw[0, 2, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] ; f_Y * id * id * id * id * id * id * id * id * id * id ; sw[0, 1, 2, 7, 3, 4, 5, 6, 8, 9, 10] ; sw[0, 1, 3, 2, 4, 5, 6, 7, 8, 9, 10] ; id * f_Y * id * id * id * id * id * id * id ; sw[0, 1, 2, 3, 4, 7, 5, 6, 8] ; sw[0, 1, 2, 4, 3, 5, 6, 7, 8] ; id * id * id * f_L * id * id * id ; id * id * id * id * t_ * id * id ; Y * id * id * id * id * id ; sw[0, 2, 3, 1, 4] ; id * f_Y * id ; id * Y * id

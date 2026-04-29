@@ -1,0 +1,15 @@
+gen P_1_T_Y___do_W__do_L__ : 2 -> 2
+gen P_2_L___do_M_T__ : 2 -> 1
+gen P_3_M___do_W__ : 1 -> 1
+gen P_4_W_____ : 0 -> 1
+gen copy : 1 -> 2
+gen del : 1 -> 0
+gen do_m : 0 -> 1 "FFD166"
+gen do_t : 0 -> 1 "FFD166"
+gen do_w : 0 -> 1 "FFD166"
+gen m : 1 -> 0 "7FDBFF"
+gen merge : 2 -> 1
+gen t_ : 1 -> 0 "7FDBFF"
+gen w : 1 -> 0 "7FDBFF"
+
+let step4 = do_t * id ; do_w * id * id ; P_4_W_____ * id * id * id ; do_w * id * id * id * id ; do_m * id * id * id * id * id ; id * id * w * id * id * id ; id * P_3_M___do_W__ * id * id * id ; sw[0, 3, 1, 2, 4] ; P_2_L___do_M_T__ * id * id * id ; id * m * id * id ; sw[1, 0, 2] ; P_1_T_Y___do_W__do_L__ * id ; t_ * id * id
