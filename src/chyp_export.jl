@@ -145,13 +145,13 @@ Export a Catlab WiringDiagram to a Chyp term by:
 3) Mapping anonymous junction boxes to copy/merge/del gens.
 """
 function wd_to_chyp(wd::WiringDiagram; name::String="main")
-    # 1) Make structure explicit
+    # Make structure explicit
     wdJ = add_junctions(wd)
 
     in_id  = input_id(wdJ)
     out_id = output_id(wdJ)
 
-    # 2) Topological order (only internal boxes > 0)
+    # Topological order (only internal boxes > 0)
     bs = [b for b in topological_order(wdJ) if b > 0]
 
     # sanity: internal boxes are 1..nboxes
@@ -162,7 +162,7 @@ function wd_to_chyp(wd::WiringDiagram; name::String="main")
         error("topo failed on junctionized wd: missing=$(missing) extra=$(extra)")
     end
 
-    # 3) Resolve generator names and declarations.
+    # Resolve generator names and declarations.
     box_names = Dict{Int,String}()
     box_colors = Dict{Int,Tuple{String,String}}()
     used_names = Dict{String,Tuple{Int,Int}}()
@@ -210,7 +210,7 @@ function wd_to_chyp(wd::WiringDiagram; name::String="main")
         push!(gen_lines, "gen $(g) : $(m) -> $(n)" * color_suffix(colors))
     end
 
-    # 4) Live wires represent the current ordered tensor of available outputs.
+    # Live wires represent the current ordered tensor of available outputs.
     # Boundary input wires count:
     live_wires = [(in_id, i) for i in 1:n_in_boundary(wdJ)]
     term = ""
@@ -225,7 +225,7 @@ function wd_to_chyp(wd::WiringDiagram; name::String="main")
         error("No source found for input (box=$tgt_box, inport=$tgt_inport)")
     end
 
-    # 5) Compile boxes
+    # Compile boxes
     for bid in bs
         g = box_names[bid]
         m = nin(wdJ, bid)
@@ -299,7 +299,7 @@ function wd_to_chyp(wd::WiringDiagram; name::String="main")
         live_wires = vcat(live_wires[1:k-1], produced, live_wires[k+m:end])
     end
 
-    # 6) Align boundary outputs (allow extra wires)
+    # Align boundary outputs (allow extra wires)
     out_m = n_out_boundary(wdJ)
     if out_m > 0
         desired = [(find_source_of_input(out_id, j)) for j in 1:out_m]
